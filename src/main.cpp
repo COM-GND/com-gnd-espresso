@@ -22,28 +22,34 @@
 #define PRESSURE_CHARACTERISTIC_ID "2A6D" // standard characteristic for pressure in bars
 #define BARS_UNIT_ID "2780"
 
-const int encoderPulsesPerRev = 40;
-const int encoderFullRangeRevs = 1;
+// Pins (set for ESP32 Devkit-c; see: https://circuits4you.com/2018/12/31/esp32-wroom32-devkit-analog-read-example/)
+const int encoderPin1 = 34;      // clk
+const int encoderPin2 = 35;      // dt
+const int encoderSwitchPin = 32; //push button switch (sw)
+// const int pumpZeroCrossPin = 27;
+// const int pumpControlPin = 14;
+// ADC Channel 1 must be used when WiFi or BT is active
+const int pressureSensorPin = 33;
 
-int encoderPin1 = 34;      // clk
-int encoderPin2 = 35;      // dt
-int encoderSwitchPin = 32; //push button switch (sw)
-
+/**
+ * Pressure Sensor Constants - TODO - check if max V OUT is 4.5 or 5
+ * Sensor range is .5 to 4.5V
+ * Scaled to 3.3 that .3 to 3V
+ * 4095/3.3 = 1240.9 steps per volt
+*/
 volatile int rawPressure = 0;
 volatile float barPressure = 0;
-int minRawPressure = 100;  // 1bar
-int maxRawPressure = 1012; // ~10bar
+const int minRawPressure = 100;  // 1bar
+const int maxRawPressure = 4095; // ~10bar
 int rawPressureRange = maxRawPressure - minRawPressure;
 
-volatile int encoderInterruptCount = 0;
-volatile int lastEncoded = 0;
 volatile float manualTargetPressure = 0;
 volatile float lastManualTargetPressure = 0;
 
-int lastMSB = 0;
-int lastLSB = 0;
+volatile int encoderInterruptCount = 0;
+const int encoderPulsesPerRev = 40;
+const int encoderFullRangeRevs = 1;
 
-float encoderResolution = .5;
 const int pumpMin = 35;
 const int pumpRange = 99 - pumpMin;
 
@@ -90,23 +96,12 @@ class PressureCallbacks : public BLECharacteristicCallbacks
   }
 };
 
-
 void setup()
 {
   // put your setup code here, to run once:
   dimmer.begin(NORMAL_MODE, ON); //dimmer initialisation: name.begin(MODE, STATE)
   Serial.begin(115200);
   Serial.println("Ready to begin");
-
-  // pinMode(encoderPin1, INPUT_PULLUP);
-  // pinMode(encoderPin2, INPUT_PULLUP);
-  // pinMode(encoderSwitchPin, INPUT_PULLUP);
-  // digitalWrite(encoderPin1, HIGH); //turn pullup resistor on
-  // digitalWrite(encoderPin2, HIGH); //turn pullup resistor on
-  // digitalWrite(encoderSwitchPin, HIGH); //turn pullup resistor on
-
-  //attachInterrupt(digitalPinToInterrupt(encoderPin1), handleEncoderInterrupt, CHANGE);
-  //attachInterrupt(digitalPinToInterrupt(encoderPin2), handleEncoderInterrupt, CHANGE);
 
   encoder.attachHalfQuad(encoderPin1, encoderPin2);
   encoder.clearCount();
@@ -141,14 +136,16 @@ void loop()
   int oldCount = encoderInterruptCount;
   encoderInterruptCount = encoder.getCount();
 
-  if(encoderInterruptCount < 0) {
+  if (encoderInterruptCount < 0)
+  {
     encoder.clearCount();
     encoderInterruptCount = 0;
-  } else if(encoderInterruptCount > encoderFullRangeRevs * encoderPulsesPerRev) {
+  }
+  else if (encoderInterruptCount > encoderFullRangeRevs * encoderPulsesPerRev)
+  {
     encoder.setCount(encoderFullRangeRevs * encoderPulsesPerRev);
     encoderInterruptCount = encoderFullRangeRevs * encoderPulsesPerRev;
   }
-
 
   if (encoderInterruptCount != oldCount)
   {
@@ -157,6 +154,8 @@ void loop()
     float encoderPerc = encoderInterruptCount / (float)(encoderFullRangeRevs * encoderPulsesPerRev);
     manualTargetPressure = (encoderPerc * (float)pumpRange) + pumpMin;
     Serial.println(String(encoderInterruptCount) + " - " + String(manualTargetPressure));
+
+    // delay(100);
   }
 
   if (lastManualTargetPressure != manualTargetPressure)
@@ -166,4 +165,10 @@ void loop()
     // TriacDimmer::setBrightness(channel_1, percVal);
     // delay(500);
   }
+
+  int rawPressure = analogRead(pressureSensorPin);
+  int voltage_value = (rawPressure * 3.3 ) / (4095);
+  Serial.println("Pressure: " + String(rawPressure));
+  delay(250);
+  // float oldPressure = pressure;
 }
