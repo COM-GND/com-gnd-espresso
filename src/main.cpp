@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <RBDdimmer.h>
+#include <ESP32Encoder.h>
 
 // https://www.arduino.cc/en/Reference/ArduinoBLE
 #include <BLEDevice.h>
@@ -11,17 +12,22 @@
 
 // https://btprodspecificationrefs.blob.core.windows.net/assigned-values/16-bit%20UUID%20Numbers%20Document.pdf
 /**
- * GATT Unit 0x2780 pressure (bar)
+ * GATT Characteristic and Object Type 0x2A6D Pressure (spec says unit is pascals)
+ * GATT Unit 0x2780 bar 
  * GATT Unit 0x272F Celsius temperature (degree Celsius)
  * GATT Characteristic and Object Type 0x2A1C Temperature Measurement
  * GATT Characteristic and Object Type 0x2A1D Temperature Type
  */
 #define SERVICE_UUID "8fc1ceca-b162-4401-9607-c8ac21383e4e"
-#define PRESSURE_CHARACTERISTIC_UUID "2780" // standard characteristic for pressure in bars
+#define PRESSURE_CHARACTERISTIC_ID "2A6D" // standard characteristic for pressure in bars
+#define BARS_UNIT_ID "2780"
 
-int encoderPin1 = 2;
-int encoderPin2 = 3;
-int encoderSwitchPin = 4; //push button switch
+const int encoderPulsesPerRev = 40;
+const int encoderFullRangeRevs = 1;
+
+int encoderPin1 = 34;      // clk
+int encoderPin2 = 35;      // dt
+int encoderSwitchPin = 32; //push button switch (sw)
 
 volatile int rawPressure = 0;
 volatile float barPressure = 0;
@@ -29,49 +35,61 @@ int minRawPressure = 100;  // 1bar
 int maxRawPressure = 1012; // ~10bar
 int rawPressureRange = maxRawPressure - minRawPressure;
 
+volatile int encoderInterruptCount = 0;
 volatile int lastEncoded = 0;
-volatile float encoderValue = 0;
-volatile float lastEncoderValue = 0;
+volatile float manualTargetPressure = 0;
+volatile float lastManualTargetPressure = 0;
 
 int lastMSB = 0;
 int lastLSB = 0;
 
 float encoderResolution = .5;
-int pumpMin = 35;
+const int pumpMin = 35;
+const int pumpRange = 99 - pumpMin;
 
 bool deviceConnected = false;
 
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+
+ESP32Encoder encoder;
 
 dimmerLamp dimmer(PUMPCTLPIN, ZEROCROSSPIN); //initialase port for dimmer for ESP8266, ESP32, Arduino due boards
 
 // https://github.com/nkolban/ESP32_BLE_Arduino/blob/master/examples/BLE_notify/BLE_notify.ino
-class ComGndServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) {
-      Serial.println("BLE Server connected");
-      deviceConnected = true;
-    };
+class ComGndServerCallbacks : public BLEServerCallbacks
+{
+  void onConnect(BLEServer *pServer)
+  {
+    Serial.println("BLE Server connected");
+    deviceConnected = true;
+  };
 
-    void onDisconnect(BLEServer* pServer) {
-       Serial.println("BLE Server Disconnected");
-      deviceConnected = false;
-    }
+  void onDisconnect(BLEServer *pServer)
+  {
+    Serial.println("BLE Server Disconnected");
+    deviceConnected = false;
+  }
 };
 //https://learn.sparkfun.com/tutorials/esp32-thing-plus-hookup-guide/arduino-example-esp32-ble
-class PressureCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic *pCharacteristic) {
-      std::string value = pCharacteristic->getValue();
+class PressureCallbacks : public BLECharacteristicCallbacks
+{
+  void onWrite(BLECharacteristic *pCharacteristic)
+  {
+    std::string value = pCharacteristic->getValue();
 
-      if (value.length() > 0) {
-        Serial.println("*********");
-        Serial.print("received value: ");
-        for (int i = 0; i < value.length(); i++)
-          Serial.print(value[i]);
+    if (value.length() > 0)
+    {
+      Serial.println("*********");
+      Serial.print("received value: ");
+      for (int i = 0; i < value.length(); i++)
+        Serial.print(value[i]);
 
-        Serial.println();
-      }
-      pCharacteristic->setValue("received " + value);
+      Serial.println();
     }
+    pCharacteristic->setValue("received " + value);
+  }
 };
+
 
 void setup()
 {
@@ -80,19 +98,29 @@ void setup()
   Serial.begin(115200);
   Serial.println("Ready to begin");
 
-  // attachInterrupt(encoderPin1, updateEncoder, CHANGE);
-  // attachInterrupt(encoderPin2, updateEncoder, CHANGE);
+  // pinMode(encoderPin1, INPUT_PULLUP);
+  // pinMode(encoderPin2, INPUT_PULLUP);
+  // pinMode(encoderSwitchPin, INPUT_PULLUP);
+  // digitalWrite(encoderPin1, HIGH); //turn pullup resistor on
+  // digitalWrite(encoderPin2, HIGH); //turn pullup resistor on
+  // digitalWrite(encoderSwitchPin, HIGH); //turn pullup resistor on
+
+  //attachInterrupt(digitalPinToInterrupt(encoderPin1), handleEncoderInterrupt, CHANGE);
+  //attachInterrupt(digitalPinToInterrupt(encoderPin2), handleEncoderInterrupt, CHANGE);
+
+  encoder.attachHalfQuad(encoderPin1, encoderPin2);
+  encoder.clearCount();
 
   BLEDevice::init("COM-GND Espresso");
   BLEServer *pServer = BLEDevice::createServer();
   pServer->setCallbacks(new ComGndServerCallbacks());
   BLEService *pService = pServer->createService(SERVICE_UUID);
   BLECharacteristic *pPressureCharacteristic = pService->createCharacteristic(
-      PRESSURE_CHARACTERISTIC_UUID,
+      PRESSURE_CHARACTERISTIC_ID,
       BLECharacteristic::PROPERTY_READ |
-      BLECharacteristic::PROPERTY_WRITE |
-      BLECharacteristic::PROPERTY_NOTIFY | 
-      BLECharacteristic::PROPERTY_INDICATE);
+          BLECharacteristic::PROPERTY_WRITE |
+          BLECharacteristic::PROPERTY_NOTIFY |
+          BLECharacteristic::PROPERTY_INDICATE);
 
   pPressureCharacteristic->setCallbacks(new PressureCallbacks());
   pPressureCharacteristic->setValue("Hell World");
@@ -110,40 +138,32 @@ void setup()
 void loop()
 {
   // put your main code here, to run repeatedly:
+  int oldCount = encoderInterruptCount;
+  encoderInterruptCount = encoder.getCount();
 
-  if (lastEncoderValue != encoderValue)
+  if(encoderInterruptCount < 0) {
+    encoder.clearCount();
+    encoderInterruptCount = 0;
+  } else if(encoderInterruptCount > encoderFullRangeRevs * encoderPulsesPerRev) {
+    encoder.setCount(encoderFullRangeRevs * encoderPulsesPerRev);
+    encoderInterruptCount = encoderFullRangeRevs * encoderPulsesPerRev;
+  }
+
+
+  if (encoderInterruptCount != oldCount)
   {
-    Serial.println(encoderValue);
-    lastEncoderValue = encoderValue;
+
+    // convert encoder value to pump PMW range
+    float encoderPerc = encoderInterruptCount / (float)(encoderFullRangeRevs * encoderPulsesPerRev);
+    manualTargetPressure = (encoderPerc * (float)pumpRange) + pumpMin;
+    Serial.println(String(encoderInterruptCount) + " - " + String(manualTargetPressure));
+  }
+
+  if (lastManualTargetPressure != manualTargetPressure)
+  {
+    Serial.println(manualTargetPressure);
+    lastManualTargetPressure = manualTargetPressure;
     // TriacDimmer::setBrightness(channel_1, percVal);
-    delay(500);
-  }
-}
-
-void updateEncoder()
-{
-
-  int MSB = digitalRead(encoderPin1); //MSB = most significant bit
-  int LSB = digitalRead(encoderPin2); //LSB = least significant bit
-
-  int encoded = (MSB << 1) | LSB;         //converting the 2 pin value to single number
-  int sum = (lastEncoded << 2) | encoded; //adding it to the previous encoded value
-  if (sum == 0b1101 || sum == 0b0100 || sum == 0b0010 || sum == 0b1011)
-  {
-    encoderValue += encoderResolution;
-  }
-  if (sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000)
-  {
-    encoderValue -= encoderResolution;
-  }
-  lastEncoded = encoded; //store this value for next time
-
-  if (encoderValue < pumpMin)
-  {
-    encoderValue = pumpMin;
-  }
-  else if (encoderValue > 99)
-  {
-    encoderValue = 99;
+    // delay(500);
   }
 }
