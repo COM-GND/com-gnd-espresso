@@ -1,14 +1,15 @@
 #include <Arduino.h>
-#include <RBDdimmer.h>
+// #include <RBDdimmer.h>
+#include <dimmable_light.h>
 #include <ESP32Encoder.h>
 
 // https://www.arduino.cc/en/Reference/ArduinoBLE
+
+// https://github.com/nkolban/ESP32_BLE_Arduino
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEServer.h>
 
-#define PUMPCTLPIN 27
-#define ZEROCROSSPIN 14
 
 // https://btprodspecificationrefs.blob.core.windows.net/assigned-values/16-bit%20UUID%20Numbers%20Document.pdf
 /**
@@ -26,13 +27,13 @@
 const int encoderPin1 = 34;      // clk
 const int encoderPin2 = 35;      // dt
 const int encoderSwitchPin = 32; //push button switch (sw)
-// const int pumpZeroCrossPin = 27;
-// const int pumpControlPin = 14;
+const int pumpZeroCrossPin = 27;
+const int pumpControlPin = 14;
 // ADC Channel 1 must be used when WiFi or BT is active
 const int pressureSensorPin = 33;
 
 /**
- * Pressure Sensor Constants - TODO - check if max V OUT is 4.5 or 5
+ * Pressure Sensor Globals - TODO - check if max V OUT is 4.5 or 5
  * Sensor range is .5 to 4.5V
  * Scaled to 3.3 that .3 to 3V
  * 4095/3.3 = 1240.9 steps per volt
@@ -43,15 +44,16 @@ const int minRawPressure = 100;  // 1bar
 const int maxRawPressure = 4095; // ~10bar
 int rawPressureRange = maxRawPressure - minRawPressure;
 
-volatile float manualTargetPressure = 0;
-volatile float lastManualTargetPressure = 0;
+volatile int pumpLevel = 0;
+volatile int lastPumpLevel = 0;
+const int pumpMin = 140;
+const int pumpRange = 254 - pumpMin;
 
 volatile int encoderInterruptCount = 0;
 const int encoderPulsesPerRev = 40;
 const int encoderFullRangeRevs = 1;
 
-const int pumpMin = 35;
-const int pumpRange = 99 - pumpMin;
+
 
 bool deviceConnected = false;
 
@@ -59,7 +61,9 @@ portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
 ESP32Encoder encoder;
 
-dimmerLamp dimmer(PUMPCTLPIN, ZEROCROSSPIN); //initialase port for dimmer for ESP8266, ESP32, Arduino due boards
+//dimmerLamp pumpControl(pumpControlPin, pumpZeroCrossPin); //initialase port for dimmer for ESP8266, ESP32, Arduino due boards
+DimmableLight light(pumpControlPin);
+
 
 // https://github.com/nkolban/ESP32_BLE_Arduino/blob/master/examples/BLE_notify/BLE_notify.ino
 class ComGndServerCallbacks : public BLEServerCallbacks
@@ -99,9 +103,12 @@ class PressureCallbacks : public BLECharacteristicCallbacks
 void setup()
 {
   // put your setup code here, to run once:
-  dimmer.begin(NORMAL_MODE, ON); //dimmer initialisation: name.begin(MODE, STATE)
+  //pumpControl.begin(NORMAL_MODE, ON); //dimmer initialisation: name.begin(MODE, STATE)
   Serial.begin(115200);
   Serial.println("Ready to begin");
+
+  DimmableLight::setSyncPin(pumpZeroCrossPin);
+  DimmableLight::begin();
 
   encoder.attachHalfQuad(encoderPin1, encoderPin2);
   encoder.clearCount();
@@ -110,7 +117,9 @@ void setup()
   BLEServer *pServer = BLEDevice::createServer();
   pServer->setCallbacks(new ComGndServerCallbacks());
   BLEService *pService = pServer->createService(SERVICE_UUID);
-  BLECharacteristic *pPressureCharacteristic = pService->createCharacteristic(
+
+  // https://www.arduino.cc/en/Reference/ArduinoBLEBLECharacteristicBLECharacteristic
+  BLEFloatCharacteristic *pPressureCharacteristic = pService->createCharacteristic(
       PRESSURE_CHARACTERISTIC_ID,
       BLECharacteristic::PROPERTY_READ |
           BLECharacteristic::PROPERTY_WRITE |
@@ -149,26 +158,26 @@ void loop()
 
   if (encoderInterruptCount != oldCount)
   {
-
     // convert encoder value to pump PMW range
     float encoderPerc = encoderInterruptCount / (float)(encoderFullRangeRevs * encoderPulsesPerRev);
-    manualTargetPressure = (encoderPerc * (float)pumpRange) + pumpMin;
-    Serial.println(String(encoderInterruptCount) + " - " + String(manualTargetPressure));
+    pumpLevel = (int)((encoderPerc * (float)pumpRange) + pumpMin);
+    //Serial.println(String(encoderInterruptCount) + " - " + String(pumpLevel));
 
-    // delay(100);
   }
 
-  if (lastManualTargetPressure != manualTargetPressure)
+  if (lastPumpLevel != pumpLevel)
   {
-    Serial.println(manualTargetPressure);
-    lastManualTargetPressure = manualTargetPressure;
+    Serial.println(pumpLevel);
+    lastPumpLevel = pumpLevel;
+    // pumpControl.setPower((pumpLevel));
+    light.setBrightness(pumpLevel);
     // TriacDimmer::setBrightness(channel_1, percVal);
     // delay(500);
   }
 
-  int rawPressure = analogRead(pressureSensorPin);
-  int voltage_value = (rawPressure * 3.3 ) / (4095);
-  Serial.println("Pressure: " + String(rawPressure));
-  delay(250);
+  //int rawPressure = analogRead(pressureSensorPin);
+  //int voltage_value = (rawPressure * 3.3 ) / (4095);
+  //Serial.println("Pressure: " + String(rawPressure));
+  //delay(250);
   // float oldPressure = pressure;
 }
