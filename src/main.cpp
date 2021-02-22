@@ -1,9 +1,8 @@
 #include <Arduino.h>
-// #include <RBDdimmer.h>
 #include <dimmable_light.h>
 #include <ESP32Encoder.h>
 
-// https://www.arduino.cc/en/Reference/ArduinoBLE
+#include <PID_v1.h>
 
 // https://github.com/nkolban/ESP32_BLE_Arduino
 #include <BLEDevice.h>
@@ -23,48 +22,71 @@
 #define PRESSURE_CHARACTERISTIC_ID "c14f18ef-4797-439e-a54f-498ba680291d" // standard characteristic for pressure in bars
 #define BARS_UNIT_ID "2780"
 
+#define ENC_PRESSURE_MODE 0
+#define ENC_POWER_MODE 1
+
 // Pins (set for ESP32 Devkit-c; see: https://circuits4you.com/2018/12/31/esp32-wroom32-devkit-analog-read-example/)
 const int encoderPin1 = 34;      // clk
 const int encoderPin2 = 35;      // dt
-const int encoderSwitchPin = 32; //push button switch (sw)
-const int pumpZeroCrossPin = 27;
+const int encoderSwitchPin = 32; // push button switch (sw)
+const int pumpZeroCrossPin = 27; // zc
 const int pumpControlPin = 14;
-// ADC Channel 1 must be used when WiFi or BT is active
+// ADC Channel 1 must be used when Esp32 WiFi or BT is active
 const int pressureSensorPin = 33;
 
 /**
- * Pressure Sensor Globals - TODO - check if max V OUT is 4.5 or 5
+ * Pressure Sensor Globals
  * Sensor range is .5 to 4.5V
- * Scaled to 3.3 that .3 to 3V
- * 4095/3.3 = 1240.9 steps per volt
+ * TODO - Work out the scaling from the Resistor Divider
 */
 volatile int rawPressure = 0;
 volatile float barPressure = 0;
-const int minRawPressure = 0;  // 1bar
+const int minRawPressure = 0;    // 1bar
 const int maxRawPressure = 3300; // ~10bar
 int rawPressureRange = maxRawPressure - minRawPressure;
 
+/**
+ * Pump Variac Globals
+ */
+// Initial pump power
 volatile int pumpLevel = 0;
 volatile int lastPumpLevel = 0;
+// The minimum value below which the pump cuts-out
 const int pumpMin = 140;
+// DimmableLight value range is 0 - 255
 const int pumpRange = 254 - pumpMin;
+DimmableLight pump(pumpControlPin);
 
-volatile int encoderInterruptCount = 0;
+/**
+ * Rotary Encoder Globals
+ */
+// initial encoder value
+volatile int encoderCount = 0;
+// The numder of pulses produced by one full revolution
 const int encoderPulsesPerRev = 40;
-const int encoderFullRangeRevs = 1;
-
-bool deviceConnected = false;
-bool oldDeviceConnected = false;
-
-portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+// The number of revolutions required for full output range
+const int encoderFullRangeRevs = 2;
+// Mode flag to set if the encoder controls the target Pressure or directly sets the pump power output
+const int encoderMode = ENC_PRESSURE_MODE;
 
 ESP32Encoder encoder;
 
-//dimmerLamp pumpControl(pumpControlPin, pumpZeroCrossPin); //initialase port for dimmer for ESP8266, ESP32, Arduino due boards
-DimmableLight light(pumpControlPin);
-
+/**
+ * Bluetooth Globals
+ */
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
 BLEServer *pServer = NULL;
 BLECharacteristic *pPressureCharacteristic = NULL;
+
+/**
+ * Pressure PID Globals
+ * https://playground.arduino.cc/Code/PIDLibrary/
+ * http://brettbeauregard.com/blog/2011/04/improving-the-beginners-pid-introduction/
+ */
+double Setpoint, Input, Output;
+PID pressurePID(&Input, &Output, &Setpoint, 2, 5, 1, P_ON_M, DIRECT); //P_ON_M specifies that Proportional on Measurement be used
+
 
 // https://github.com/nkolban/ESP32_BLE_Arduino/blob/master/examples/BLE_notify/BLE_notify.ino
 class ComGndServerCallbacks : public BLEServerCallbacks
@@ -125,8 +147,7 @@ void setup()
   BLEService *pService = pServer->createService(SERVICE_UUID);
   Serial.println("BLE Service Initialized");
   pServer->setCallbacks(new ComGndServerCallbacks());
-    Serial.println("BLE Server Callback Initialized");
-
+  Serial.println("BLE Server Callback Initialized");
 
   // https://www.arduino.cc/en/Reference/ArduinoBLEBLECharacteristicBLECharacteristic
   pPressureCharacteristic = pService->createCharacteristic(
@@ -159,44 +180,57 @@ void setup()
   Serial.println("BLE BLEAdvertising Setup Complete");
 
   BLEDevice::startAdvertising();
-   Serial.println("BLE Advertizing Started");
+  Serial.println("BLE Advertizing Started");
   Serial.println("BLE Setup Complete");
+
+  // PID
+  Setpoint = 10; // bars
+  pressurePID.SetOutputLimits(pumpMin, 255);
+  pressurePID.SetMode(AUTOMATIC);
 }
 
 void loop()
 {
-  int oldCount = encoderInterruptCount;
-  encoderInterruptCount = encoder.getCount();
+  int oldEncoderCount = encoderCount;
+  encoderCount = encoder.getCount();
 
-  if (encoderInterruptCount < 0)
+  if (encoderCount < 0)
   {
     encoder.clearCount();
-    encoderInterruptCount = 0;
+    encoderCount = 0;
   }
-  else if (encoderInterruptCount > encoderFullRangeRevs * encoderPulsesPerRev)
+  else if (encoderCount > encoderFullRangeRevs * encoderPulsesPerRev)
   {
     encoder.setCount(encoderFullRangeRevs * encoderPulsesPerRev);
-    encoderInterruptCount = encoderFullRangeRevs * encoderPulsesPerRev;
+    encoderCount = encoderFullRangeRevs * encoderPulsesPerRev;
   }
 
-  if (encoderInterruptCount != oldCount)
+  if (encoderCount != oldEncoderCount)
   {
-    // convert encoder value to pump PMW range
-    float encoderPerc = encoderInterruptCount / (float)(encoderFullRangeRevs * encoderPulsesPerRev);
-    pumpLevel = (int)((encoderPerc * (float)pumpRange) + pumpMin);
-    //Serial.println(String(encoderInterruptCount) + " - " + String(pumpLevel));
+    // convert encoder value to percentage
+    float encoderPerc = encoderCount / (float)(encoderFullRangeRevs * encoderPulsesPerRev);
+    
+    if(encoderMode == ENC_POWER_MODE) {
+      // in power mode, the encoder set's the pump power directly
+      pumpLevel = (int)((encoderPerc * (float)pumpRange) + pumpMin);
+    } else {
+      // In Pressure mode, the encoder sets the target Pressure for the PID
+      Setpoint = encoderPerc * 10.0;
+    }
+    //Serial.println(String(encoderCount) + " - " + String(pumpLevel));
+  }
+
+  if(encoderMode == ENC_PRESSURE_MODE) {
+    pumpLevel = Output;
   }
 
   if (lastPumpLevel != pumpLevel)
   {
     Serial.println(pumpLevel);
     lastPumpLevel = pumpLevel;
-    // pumpControl.setPower((pumpLevel));
-    light.setBrightness(pumpLevel);
-    // TriacDimmer::setBrightness(channel_1, percVal);
-    // delay(500);
+    pump.setBrightness(pumpLevel);
   }
- 
+
   int lastRawPressure = rawPressure;
   int rawPressure = analogRead(pressureSensorPin);
   if (lastRawPressure != rawPressure)
@@ -204,7 +238,7 @@ void loop()
     int normalizeRawPressure = rawPressure - minRawPressure;
     float rawPressurePerc = (float)((float)normalizeRawPressure / (float)rawPressureRange);
     float barPressure = (rawPressurePerc * 10.0);
-    Serial.println(String(barPressure) + " - " + String(rawPressure) );
+    Serial.println(String(barPressure) + " - " + String(rawPressure));
     delay(250);
     if (deviceConnected)
     {
@@ -212,12 +246,14 @@ void loop()
       pPressureCharacteristic->notify();
       delay(3);
     }
+    Input = barPressure;
+
   }
 
   // disconnecting
   if (!deviceConnected && oldDeviceConnected)
   {
-    delay(500); // give the bluetooth stack the chance to get things ready
+    delay(500);                  // give the bluetooth stack the chance to get things ready
     pServer->startAdvertising(); // restart advertising
     Serial.println("start advertising");
     oldDeviceConnected = deviceConnected;
@@ -229,7 +265,6 @@ void loop()
     oldDeviceConnected = deviceConnected;
   }
 
-  //Serial.println("Pressure: " + String(rawPressure));
-  //delay(250);
-  // float oldPressure = pressure;
+  pressurePID.Compute();
+  
 }
