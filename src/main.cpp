@@ -53,19 +53,20 @@ volatile int pumpLevel = 0;
 volatile int lastPumpLevel = 0;
 // The minimum value below which the pump cuts-out
 const int pumpMin = 140;
-// DimmableLight value range is 0 - 255
-const int pumpRange = 254 - pumpMin;
+// DimmableLight value range is 0 - 255 - but Robotdyn seems to cut out at 100% (255)
+const int pumpMax = 254;
+const int pumpRange = pumpMax - pumpMin;
 DimmableLight pump(pumpControlPin);
 
 /**
  * Rotary Encoder Globals
  */
-// initial encoder value
-volatile int encoderCount = 0;
 // The numder of pulses produced by one full revolution
 const int encoderPulsesPerRev = 40;
 // The number of revolutions required for full output range
 const int encoderFullRangeRevs = 2;
+// initial encoder value - set to max for initializing at full pressure
+volatile int encoderCount = encoderFullRangeRevs * encoderPulsesPerRev;
 // Mode flag to set if the encoder controls the target Pressure or directly sets the pump power output
 const int encoderMode = ENC_PRESSURE_MODE;
 
@@ -85,7 +86,8 @@ BLECharacteristic *pPressureCharacteristic = NULL;
  * http://brettbeauregard.com/blog/2011/04/improving-the-beginners-pid-introduction/
  */
 double Setpoint, Input, Output;
-PID pressurePID(&Input, &Output, &Setpoint, 2, 5, 1, P_ON_M, DIRECT); //P_ON_M specifies that Proportional on Measurement be used
+
+PID pressurePID(&Input, &Output, &Setpoint, 3.75, 6, 1, P_ON_M, DIRECT); //P_ON_M specifies that Proportional on Measurement be used
 
 
 // https://github.com/nkolban/ESP32_BLE_Arduino/blob/master/examples/BLE_notify/BLE_notify.ino
@@ -185,7 +187,7 @@ void setup()
 
   // PID
   Setpoint = 10; // bars
-  pressurePID.SetOutputLimits(pumpMin, 255);
+  pressurePID.SetOutputLimits(pumpMin, pumpMax);
   pressurePID.SetMode(AUTOMATIC);
 }
 
@@ -226,7 +228,7 @@ void loop()
 
   if (lastPumpLevel != pumpLevel)
   {
-    Serial.println(pumpLevel);
+    // Serial.println(pumpLevel);
     lastPumpLevel = pumpLevel;
     pump.setBrightness(pumpLevel);
   }
@@ -238,8 +240,8 @@ void loop()
     int normalizeRawPressure = rawPressure - minRawPressure;
     float rawPressurePerc = (float)((float)normalizeRawPressure / (float)rawPressureRange);
     float barPressure = (rawPressurePerc * 10.0);
-    Serial.println(String(barPressure) + " - " + String(rawPressure));
-    delay(250);
+    Serial.println("Sp: " + String(Setpoint) + " O: " + String(Output) + " I: " + String(Input));
+     delay(50);
     if (deviceConnected)
     {
       pPressureCharacteristic->setValue(barPressure);

@@ -23,7 +23,7 @@ This project is unstable and undergoing active development.
 
 ## COM-GND Espresso Modules
 - Pressure Sensor for pressure profile  feedback
-- Variable pump power control pressure profile control
+- Variable pump power modulator for pressure profile control
 - Pressure knob rotary encoder for manual pump control
 - BLE (Bluetooth) interface for App control  
 ### Forthcoming Modules
