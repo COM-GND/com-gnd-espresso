@@ -1,4 +1,8 @@
-# COM-GND Espresso Lab
+
+![COM GND Logo](https://raw.githubusercontent.com/COM-GND/com-gnd-espresso/main/docs/com-gnd_logo_left-lock.svg)
+
+
+# COM-GND Espresso
 
 COM-GND Espresso is an open-source hardware and firmware project aiming to develop a standard set of control modules for Espresso machines.
 
