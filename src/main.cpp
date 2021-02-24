@@ -41,7 +41,7 @@ const int pressureSensorPin = 33;
 */
 volatile int rawPressure = 0;
 volatile float barPressure = 0;
-const int minRawPressure = 0;    // 1bar
+const int minRawPressure = 50;    // 1bar
 const int maxRawPressure = 3300; // ~10bar
 int rawPressureRange = maxRawPressure - minRawPressure;
 
@@ -207,10 +207,11 @@ void loop()
     encoderCount = encoderFullRangeRevs * encoderPulsesPerRev;
   }
 
+  // convert encoder value to percentage
+  float encoderPerc = encoderCount / (float)(encoderFullRangeRevs * encoderPulsesPerRev);
+
   if (encoderCount != oldEncoderCount)
   {
-    // convert encoder value to percentage
-    float encoderPerc = encoderCount / (float)(encoderFullRangeRevs * encoderPulsesPerRev);
     
     if(encoderMode == ENC_POWER_MODE) {
       // in power mode, the encoder set's the pump power directly
@@ -240,7 +241,7 @@ void loop()
     int normalizeRawPressure = rawPressure - minRawPressure;
     float rawPressurePerc = (float)((float)normalizeRawPressure / (float)rawPressureRange);
     float barPressure = (rawPressurePerc * 10.0);
-    Serial.println("Sp: " + String(Setpoint) + " O: " + String(Output) + " I: " + String(Input));
+    Serial.println("Sp: " + String(Setpoint) + " O: " + String(Output) + " I: " + String(Input) + " B: " + String(rawPressurePerc));
      delay(50);
     if (deviceConnected)
     {
@@ -248,7 +249,32 @@ void loop()
       pPressureCharacteristic->notify();
       delay(3);
     }
-    Input = barPressure;
+
+    // Pressure is not a useful input value when there is no resistance to the pump.
+    // e.g. when the portafilter is empty, the pressure will be approaching 0, as flow approaches pump maximum.
+    // ideally the system would model flow rate rather than pressure to solve this. 
+    // For now, when the system pressure is below a set point, we *very* roughly estimate the flow rate
+    // The pump has specifications for flow at a given pressure, but not for a variable power supply
+    // TODO: characterize pump flow at various power levels - this can be done once a scale
+    // is integrated to measure water output accross different power levels. 
+
+    if(rawPressurePerc < .2) {
+      // under 2 bars, transition to a roughly estimated flow-rate
+      // flow will be estimated as the inverse of pressure * the pump power %
+      float pumpPerc = (float)pumpLevel / (float)pumpMax;
+      float estFlow = (1 - rawPressurePerc) * pumpPerc;
+      // scale flow to match magnitude of pressure
+      float scaledFlow = estFlow * 10;
+      // create a differential to increase weight of flow vs pressure on PID Input, as pressure drops
+      float delta = .2 - rawPressurePerc;
+      float flowWeight = 2.0;
+      float blendedInput = (delta * scaledFlow * flowWeight) + (.2 - (delta * barPressure));
+      Input = blendedInput;
+    } else {
+      // when pressure is above set point, let the PID act on pressure alone
+      Input = barPressure;
+    }
+  
 
   }
 
