@@ -1,4 +1,8 @@
 #include <Arduino.h>
+/**
+ * NOTE: The mains frequency must be set in ./lib/Dimmable-Light-Arduino-master/src/thyristor.h
+ * It has been set 60hz for this applicatio.
+ */ 
 #include <dimmable_light.h>
 #include <ESP32Encoder.h>
 
@@ -52,7 +56,7 @@ int rawPressureRange = maxRawPressure - minRawPressure;
 volatile int pumpLevel = 0;
 volatile int lastPumpLevel = 0;
 // The minimum value below which the pump cuts-out
-const int pumpMin = 140;
+const int pumpMin = 130;
 // DimmableLight value range is 0 - 255 - but Robotdyn seems to cut out at 100% (255)
 const int pumpMax = 254;
 const int pumpRange = pumpMax - pumpMin;
@@ -68,7 +72,7 @@ const int encoderFullRangeRevs = 2;
 // initial encoder value - set to max for initializing at full pressure
 volatile int encoderCount = encoderFullRangeRevs * encoderPulsesPerRev;
 // Mode flag to set if the encoder controls the target Pressure or directly sets the pump power output
-const int encoderMode = ENC_PRESSURE_MODE;
+int encoderMode = ENC_PRESSURE_MODE;
 
 ESP32Encoder encoder;
 
@@ -125,6 +129,15 @@ class PressureCallbacks : public BLECharacteristicCallbacks
   }
 };
 
+void setEncoderMode(int mode) {
+  if(mode == ENC_POWER_MODE) {
+    encoderMode = ENC_POWER_MODE;
+    pressurePID.SetMode(MANUAL);
+  } else {
+    encoderMode = ENC_PRESSURE_MODE;
+    pressurePID.SetMode(AUTOMATIC);
+  }
+}
 void setup()
 {
   // put your setup code here, to run once:
@@ -227,12 +240,7 @@ void loop()
     pumpLevel = Output;
   }
 
-  if (lastPumpLevel != pumpLevel)
-  {
-    // Serial.println(pumpLevel);
-    lastPumpLevel = pumpLevel;
-    pump.setBrightness(pumpLevel);
-  }
+  
 
   int lastRawPressure = rawPressure;
   int rawPressure = analogRead(pressureSensorPin);
@@ -241,7 +249,7 @@ void loop()
     int normalizeRawPressure = rawPressure - minRawPressure;
     float rawPressurePerc = (float)((float)normalizeRawPressure / (float)rawPressureRange);
     float barPressure = (rawPressurePerc * 10.0);
-    Serial.println("Sp: " + String(Setpoint) + " O: " + String(Output) + " I: " + String(Input) + " B: " + String(rawPressurePerc));
+    //Serial.println("Sp: " + String(Setpoint) + " O: " + String(Output) + " I: " + String(Input) + " B: " + String(rawPressurePerc));
      delay(50);
     if (deviceConnected)
     {
@@ -258,25 +266,39 @@ void loop()
     // TODO: characterize pump flow at various power levels - this can be done once a scale
     // is integrated to measure water output accross different power levels. 
 
-    if(rawPressurePerc < .2) {
+    const float setPoint = .2;
+    if(rawPressurePerc < setPoint) {
+
+      pressurePID.SetTunings(3.75, 5.5, .5);
       // under 2 bars, transition to a roughly estimated flow-rate
       // flow will be estimated as the inverse of pressure * the pump power %
-      float pumpPerc = (float)pumpLevel / (float)pumpMax;
+      float pumpPerc = (float)(pumpLevel - pumpMin) / (float)pumpRange;
       float estFlow = (1 - rawPressurePerc) * pumpPerc;
       // scale flow to match magnitude of pressure
       float scaledFlow = estFlow * 10;
       // create a differential to increase weight of flow vs pressure on PID Input, as pressure drops
-      float delta = .2 - rawPressurePerc;
-      float flowWeight = 2.0;
-      float blendedInput = (delta * scaledFlow * flowWeight) + (.2 - (delta * barPressure));
-      Input = blendedInput;
+      float delta = setPoint - rawPressurePerc;
+      float nomalizedDelta = 1/setPoint * delta; // scale delta to 0 - 1;
+      float blendedInput = (nomalizedDelta * estFlow) + ((1-nomalizedDelta) * rawPressurePerc);
+      Serial.println("enc:" + String(encoderPerc) + " p: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
+
+      Input = blendedInput * 10.0;
     } else {
       // when pressure is above set point, let the PID act on pressure alone
+      pressurePID.SetTunings(3.75, 6, 1);
       Input = barPressure;
     }
   
 
   }
+
+  if (lastPumpLevel != pumpLevel)
+  {
+    // Serial.println(pumpLevel);
+    lastPumpLevel = pumpLevel;
+    pump.setBrightness(pumpLevel);
+  }
+
 
   // disconnecting
   if (!deviceConnected && oldDeviceConnected)
@@ -292,6 +314,7 @@ void loop()
     // do stuff here on connecting
     oldDeviceConnected = deviceConnected;
   }
+
 
   pressurePID.Compute();
   

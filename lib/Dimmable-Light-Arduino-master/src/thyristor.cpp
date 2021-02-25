@@ -36,7 +36,7 @@
 // If the interrupt is "too" close to the previous one, ignore the current one.
 // To define if two interrupts are too close, look at semiPeriodShrinkMargin and
 // semiPeriodExpandMargin constant
-//#define FILTER_INT_PERIOD
+#define FILTER_INT_PERIOD
 
 // FOR DEBUG PURPOSE ONLY: 
 // If the FILTER_INT_PERIOD is enabled, print on Serial the time passed 
