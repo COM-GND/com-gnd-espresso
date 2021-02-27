@@ -14,6 +14,9 @@
 #include <BLEServer.h>
 #include <BLE2902.h>
 
+#include "pump-module.h"
+
+
 // https://btprodspecificationrefs.blob.core.windows.net/assigned-values/16-bit%20UUID%20Numbers%20Document.pdf
 /**
  * GATT Characteristic and Object Type 0x2A6D Pressure (spec says unit is pascals)
@@ -60,7 +63,9 @@ const int pumpMin = 130;
 // DimmableLight value range is 0 - 255 - but Robotdyn seems to cut out at 100% (255)
 const int pumpMax = 254;
 const int pumpRange = pumpMax - pumpMin;
-DimmableLight pump(pumpControlPin);
+// DimmableLight pump(pumpControlPin);
+
+PumpModule pump(pumpZeroCrossPin, pumpControlPin);
 
 /**
  * Rotary Encoder Globals
@@ -93,6 +98,21 @@ double Setpoint, Input, Output;
 
 PID pressurePID(&Input, &Output, &Setpoint, 3.75, 6, 1, P_ON_M, DIRECT); //P_ON_M specifies that Proportional on Measurement be used
 
+class PumpCallbacks : public PumpModuleCallbacks
+{
+  void onPowerOn(PumpModule *module)
+  {
+    Serial.println("onPowerOn");
+    pressurePID.SetMode(AUTOMATIC);
+  }
+
+  void onPowerOff(PumpModule *module)
+  {
+    Serial.println("onPowerOff");
+    pressurePID.SetMode(MANUAL);
+  }
+
+};
 
 // https://github.com/nkolban/ESP32_BLE_Arduino/blob/master/examples/BLE_notify/BLE_notify.ino
 class ComGndServerCallbacks : public BLEServerCallbacks
@@ -140,13 +160,15 @@ void setEncoderMode(int mode) {
 }
 void setup()
 {
-  // put your setup code here, to run once:
-  //pumpControl.begin(NORMAL_MODE, ON); //dimmer initialisation: name.begin(MODE, STATE)
+
   Serial.begin(115200);
   Serial.println("Setup start");
 
-  DimmableLight::setSyncPin(pumpZeroCrossPin);
-  DimmableLight::begin();
+  pump.setCallbacks(new PumpCallbacks());
+
+  pump.begin();
+  
+  pump.setPumpPercent(1);
 
   Serial.println("Pump Control Configured");
 
@@ -201,7 +223,7 @@ void setup()
   // PID
   Setpoint = 10; // bars
   pressurePID.SetOutputLimits(pumpMin, pumpMax);
-  pressurePID.SetMode(AUTOMATIC);
+  pressurePID.SetMode(pump.getPowerIsOn() ? AUTOMATIC : MANUAL);
 }
 
 void loop()
@@ -240,8 +262,6 @@ void loop()
     pumpLevel = Output;
   }
 
-  
-
   int lastRawPressure = rawPressure;
   int rawPressure = analogRead(pressureSensorPin);
   if (lastRawPressure != rawPressure)
@@ -272,15 +292,14 @@ void loop()
       pressurePID.SetTunings(3.75, 5.5, .5);
       // under 2 bars, transition to a roughly estimated flow-rate
       // flow will be estimated as the inverse of pressure * the pump power %
-      float pumpPerc = (float)(pumpLevel - pumpMin) / (float)pumpRange;
+      // float pumpPerc = (float)(pumpLevel - pumpMin) / (float)pumpRange;
+      float pumpPerc = pump.getPowerIsOn() ? pump.getPumpPercent() : 0;
       float estFlow = (1 - rawPressurePerc) * pumpPerc;
-      // scale flow to match magnitude of pressure
-      float scaledFlow = estFlow * 10;
       // create a differential to increase weight of flow vs pressure on PID Input, as pressure drops
       float delta = setPoint - rawPressurePerc;
       float nomalizedDelta = 1/setPoint * delta; // scale delta to 0 - 1;
       float blendedInput = (nomalizedDelta * estFlow) + ((1-nomalizedDelta) * rawPressurePerc);
-      Serial.println("enc:" + String(encoderPerc) + " p: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
+      Serial.println("out: " + String(Output) + " enc:" + String(encoderPerc) + " p: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
 
       Input = blendedInput * 10.0;
     } else {
@@ -296,7 +315,7 @@ void loop()
   {
     // Serial.println(pumpLevel);
     lastPumpLevel = pumpLevel;
-    pump.setBrightness(pumpLevel);
+    pump.setPumpLevel(pumpLevel);
   }
 
 
