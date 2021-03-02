@@ -2,7 +2,7 @@
 /**
  * NOTE: The mains frequency must be set in ./lib/Dimmable-Light-Arduino-master/src/thyristor.h
  * It has been set 60hz for this applicatio.
- */ 
+ */
 #include <dimmable_light.h>
 #include <ESP32Encoder.h>
 
@@ -15,7 +15,6 @@
 #include <BLE2902.h>
 
 #include "pump-module.h"
-
 
 // https://btprodspecificationrefs.blob.core.windows.net/assigned-values/16-bit%20UUID%20Numbers%20Document.pdf
 /**
@@ -46,9 +45,10 @@ const int pressureSensorPin = 33;
  * Sensor range is .5 to 4.5V
  * TODO - Work out the scaling from the Resistor Divider
 */
-volatile int rawPressure = 0;
-volatile float barPressure = 0;
-const int minRawPressure = 50;    // 1bar
+int rawPressure = 0;
+float lastBarPressure = 0;
+float barPressure = 0;
+const int minRawPressure = 50;   // 1bar
 const int maxRawPressure = 3300; // ~10bar
 int rawPressureRange = maxRawPressure - minRawPressure;
 
@@ -94,7 +94,9 @@ BLECharacteristic *pPressureCharacteristic = NULL;
  * https://playground.arduino.cc/Code/PIDLibrary/
  * http://brettbeauregard.com/blog/2011/04/improving-the-beginners-pid-introduction/
  */
-double Setpoint, Input, Output;
+double Setpoint = 0;
+double Input = 0;
+double Output = 0;
 
 PID pressurePID(&Input, &Output, &Setpoint, 3.75, 6, 1, P_ON_M, DIRECT); //P_ON_M specifies that Proportional on Measurement be used
 
@@ -103,15 +105,16 @@ class PumpCallbacks : public PumpModuleCallbacks
   void onPowerOn(PumpModule *module)
   {
     Serial.println("onPowerOn");
+    Output = 0;
     pressurePID.SetMode(AUTOMATIC);
   }
 
   void onPowerOff(PumpModule *module)
   {
     Serial.println("onPowerOff");
+    Output = 0;
     pressurePID.SetMode(MANUAL);
   }
-
 };
 
 // https://github.com/nkolban/ESP32_BLE_Arduino/blob/master/examples/BLE_notify/BLE_notify.ino
@@ -149,11 +152,15 @@ class PressureCallbacks : public BLECharacteristicCallbacks
   }
 };
 
-void setEncoderMode(int mode) {
-  if(mode == ENC_POWER_MODE) {
+void setEncoderMode(int mode)
+{
+  if (mode == ENC_POWER_MODE)
+  {
     encoderMode = ENC_POWER_MODE;
     pressurePID.SetMode(MANUAL);
-  } else {
+  }
+  else
+  {
     encoderMode = ENC_PRESSURE_MODE;
     pressurePID.SetMode(AUTOMATIC);
   }
@@ -167,7 +174,7 @@ void setup()
   pump.setCallbacks(new PumpCallbacks());
 
   pump.begin();
-  
+
   pump.setPumpPercent(1);
 
   Serial.println("Pump Control Configured");
@@ -226,6 +233,9 @@ void setup()
   pressurePID.SetMode(pump.getPowerIsOn() ? AUTOMATIC : MANUAL);
 }
 
+/**
+ * Main Loop
+ */
 void loop()
 {
   int oldEncoderCount = encoderCount;
@@ -247,30 +257,37 @@ void loop()
 
   if (encoderCount != oldEncoderCount)
   {
-    
-    if(encoderMode == ENC_POWER_MODE) {
+
+    if (encoderMode == ENC_POWER_MODE)
+    {
       // in power mode, the encoder set's the pump power directly
       pumpLevel = (int)((encoderPerc * (float)pumpRange) + pumpMin);
-    } else {
+    }
+    else
+    {
       // In Pressure mode, the encoder sets the target Pressure for the PID
       Setpoint = encoderPerc * 10.0;
     }
     //Serial.println(String(encoderCount) + " - " + String(pumpLevel));
   }
 
-  if(encoderMode == ENC_PRESSURE_MODE) {
+  if (encoderMode == ENC_PRESSURE_MODE)
+  {
     pumpLevel = Output;
   }
 
   int lastRawPressure = rawPressure;
   int rawPressure = analogRead(pressureSensorPin);
-  if (lastRawPressure != rawPressure)
+  int normalizeRawPressure = rawPressure - minRawPressure;
+  float rawPressurePerc = (float)((float)normalizeRawPressure / (float)rawPressureRange);
+  lastBarPressure = barPressure;
+  // calculate the bar pressure, rounding two 2 decimals
+  // TODO: this seems to result in a float like 12.1200000012345
+  barPressure = roundf(rawPressurePerc * 10.0 * 100.0) / 100.0;
+
+  if (lastBarPressure != barPressure)
   {
-    int normalizeRawPressure = rawPressure - minRawPressure;
-    float rawPressurePerc = (float)((float)normalizeRawPressure / (float)rawPressureRange);
-    float barPressure = (rawPressurePerc * 10.0);
-    //Serial.println("Sp: " + String(Setpoint) + " O: " + String(Output) + " I: " + String(Input) + " B: " + String(rawPressurePerc));
-     delay(50);
+    delay(100);
     if (deviceConnected)
     {
       pPressureCharacteristic->setValue(barPressure);
@@ -280,14 +297,15 @@ void loop()
 
     // Pressure is not a useful input value when there is no resistance to the pump.
     // e.g. when the portafilter is empty, the pressure will be approaching 0, as flow approaches pump maximum.
-    // ideally the system would model flow rate rather than pressure to solve this. 
+    // ideally the system would model flow rate rather than pressure to solve this.
     // For now, when the system pressure is below a set point, we *very* roughly estimate the flow rate
     // The pump has specifications for flow at a given pressure, but not for a variable power supply
     // TODO: characterize pump flow at various power levels - this can be done once a scale
-    // is integrated to measure water output accross different power levels. 
+    // is integrated to measure water output accross different power levels.
 
     const float setPoint = .2;
-    if(rawPressurePerc < setPoint) {
+    if (rawPressurePerc < setPoint)
+    {
 
       pressurePID.SetTunings(3.75, 5.5, .5);
       // under 2 bars, transition to a roughly estimated flow-rate
@@ -297,18 +315,19 @@ void loop()
       float estFlow = (1 - rawPressurePerc) * pumpPerc;
       // create a differential to increase weight of flow vs pressure on PID Input, as pressure drops
       float delta = setPoint - rawPressurePerc;
-      float nomalizedDelta = 1/setPoint * delta; // scale delta to 0 - 1;
-      float blendedInput = (nomalizedDelta * estFlow) + ((1-nomalizedDelta) * rawPressurePerc);
+      float nomalizedDelta = 1 / setPoint * delta; // scale delta to 0 - 1;
+      float blendedInput = (nomalizedDelta * estFlow) + ((1 - nomalizedDelta) * rawPressurePerc);
       Serial.println("out: " + String(Output) + " enc:" + String(encoderPerc) + " p: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
 
       Input = blendedInput * 10.0;
-    } else {
+    }
+    else
+    {
       // when pressure is above set point, let the PID act on pressure alone
+      Serial.println("Sp: " + String(Setpoint) + " O: " + String(Output) + " I: " + String(Input) + " B: " + String(rawPressurePerc));
       pressurePID.SetTunings(3.75, 6, 1);
       Input = barPressure;
     }
-  
-
   }
 
   if (lastPumpLevel != pumpLevel)
@@ -317,7 +336,6 @@ void loop()
     lastPumpLevel = pumpLevel;
     pump.setPumpLevel(pumpLevel);
   }
-
 
   // disconnecting
   if (!deviceConnected && oldDeviceConnected)
@@ -334,7 +352,5 @@ void loop()
     oldDeviceConnected = deviceConnected;
   }
 
-
   pressurePID.Compute();
-  
 }
