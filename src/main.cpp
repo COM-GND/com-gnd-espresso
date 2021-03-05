@@ -4,7 +4,6 @@
  * It has been set 60hz for this applicatio.
  */
 #include <dimmable_light.h>
-#include <ESP32Encoder.h>
 
 #include <PID_v1.h>
 
@@ -15,6 +14,7 @@
 #include <BLE2902.h>
 
 #include "pump-module.h"
+#include "rotary-encoder-module.h"
 
 // https://btprodspecificationrefs.blob.core.windows.net/assigned-values/16-bit%20UUID%20Numbers%20Document.pdf
 /**
@@ -32,13 +32,13 @@
 #define ENC_POWER_MODE 1
 
 // Pins (set for ESP32 Devkit-c; see: https://circuits4you.com/2018/12/31/esp32-wroom32-devkit-analog-read-example/)
-const int encoderPin1 = 34;      // clk
-const int encoderPin2 = 35;      // dt
-const int encoderSwitchPin = 32; // push button switch (sw)
-const int pumpZeroCrossPin = 27; // zc
-const int pumpControlPin = 14;
+const unsigned char encoderPin1 = 34;      // clk
+const unsigned char encoderPin2 = 35;      // dt
+const unsigned char encoderSwitchPin = 32; // push button switch (sw)
+const unsigned char pumpZeroCrossPin = 27; // zc
+const unsigned char pumpControlPin = 14;
 // ADC Channel 1 must be used when Esp32 WiFi or BT is active
-const int pressureSensorPin = 33;
+const unsigned char pressureSensorPin = 33;
 
 /**
  * Pressure Sensor Globals
@@ -67,19 +67,11 @@ const int pumpRange = pumpMax - pumpMin;
 
 PumpModule pump(pumpZeroCrossPin, pumpControlPin);
 
-/**
- * Rotary Encoder Globals
- */
-// The numder of pulses produced by one full revolution
-const int encoderPulsesPerRev = 40;
-// The number of revolutions required for full output range
-const int encoderFullRangeRevs = 2;
-// initial encoder value - set to max for initializing at full pressure
-volatile int encoderCount = encoderFullRangeRevs * encoderPulsesPerRev;
-// Mode flag to set if the encoder controls the target Pressure or directly sets the pump power output
+
 int encoderMode = ENC_PRESSURE_MODE;
 
-ESP32Encoder encoder;
+RotaryEncoderModule rotaryEncoder(encoderPin1, encoderPin2, encoderSwitchPin);
+
 
 /**
  * Bluetooth Globals
@@ -99,6 +91,24 @@ double Input = 0;
 double Output = 0;
 
 PID pressurePID(&Input, &Output, &Setpoint, 3.75, 6, 1, P_ON_M, DIRECT); //P_ON_M specifies that Proportional on Measurement be used
+
+class RotartEncodeCallbacks : public RotaryEncoderModuleCallbacks
+{
+  void onButtonDown(RotaryEncoderModule *module)
+  {
+    Serial.println("onButtonDown");
+  }
+  void onButtonUp(RotaryEncoderModule *module)
+  {
+    Serial.println("onButtonUp");
+  }
+  void onEncoderChange(RotaryEncoderModule *module)
+  {
+    float perc = module->getPercent();
+    Serial.println("onEncoderChange: " + String(perc));
+    Setpoint = perc * 10.0;
+  }
+};
 
 class PumpCallbacks : public PumpModuleCallbacks
 {
@@ -172,17 +182,10 @@ void setup()
   Serial.println("Setup start");
 
   pump.setCallbacks(new PumpCallbacks());
-
   pump.begin();
-
   pump.setPumpPercent(1);
 
   Serial.println("Pump Control Configured");
-
-  encoder.attachHalfQuad(encoderPin1, encoderPin2);
-  encoder.clearCount();
-
-  Serial.println("Encoder Configured");
 
   BLEDevice::init("COM-GND Espresso");
   Serial.println("BLE Device Initialized");
@@ -227,6 +230,10 @@ void setup()
   Serial.println("BLE Advertizing Started");
   Serial.println("BLE Setup Complete");
 
+  // Rotary Encoder
+  rotaryEncoder.setCallbacks(new RotartEncodeCallbacks());
+  rotaryEncoder.begin();
+
   // PID
   Setpoint = 10; // bars
   pressurePID.SetOutputLimits(pumpMin, pumpMax);
@@ -238,38 +245,6 @@ void setup()
  */
 void loop()
 {
-  int oldEncoderCount = encoderCount;
-  encoderCount = encoder.getCount();
-
-  if (encoderCount < 0)
-  {
-    encoder.clearCount();
-    encoderCount = 0;
-  }
-  else if (encoderCount > encoderFullRangeRevs * encoderPulsesPerRev)
-  {
-    encoder.setCount(encoderFullRangeRevs * encoderPulsesPerRev);
-    encoderCount = encoderFullRangeRevs * encoderPulsesPerRev;
-  }
-
-  // convert encoder value to percentage
-  float encoderPerc = encoderCount / (float)(encoderFullRangeRevs * encoderPulsesPerRev);
-
-  if (encoderCount != oldEncoderCount)
-  {
-
-    if (encoderMode == ENC_POWER_MODE)
-    {
-      // in power mode, the encoder set's the pump power directly
-      pumpLevel = (int)((encoderPerc * (float)pumpRange) + pumpMin);
-    }
-    else
-    {
-      // In Pressure mode, the encoder sets the target Pressure for the PID
-      Setpoint = encoderPerc * 10.0;
-    }
-    //Serial.println(String(encoderCount) + " - " + String(pumpLevel));
-  }
 
   if (encoderMode == ENC_PRESSURE_MODE)
   {
@@ -317,7 +292,7 @@ void loop()
       float delta = setPoint - rawPressurePerc;
       float nomalizedDelta = 1 / setPoint * delta; // scale delta to 0 - 1;
       float blendedInput = (nomalizedDelta * estFlow) + ((1 - nomalizedDelta) * rawPressurePerc);
-      Serial.println("out: " + String(Output) + " enc:" + String(encoderPerc) + " p: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
+      Serial.println("out: " + String(Output) + " p: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
 
       Input = blendedInput * 10.0;
     }
