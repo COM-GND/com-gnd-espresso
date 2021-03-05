@@ -13,7 +13,7 @@ int gPowerOn = false;
 
 PumpModule::PumpModule(int zcPin, int cntrlPin) : pump(cntrlPin)
 {
-  pumpMin = 130;
+  pumpMin = 125;
   pumpMax = 254;
   pumpRange = pumpMax - pumpMin;
   pumpLevel = pumpMax;
@@ -41,12 +41,13 @@ void PumpModule::watchPumpPowerTask(void *pump)
   {
 
     pinValue = digitalRead(pin);
-    // pin is pulled low when power is on
+    // pin is pulled high when power is off and is ac wave when power is on
+    // Therefor is pin holds at high for a certain number of cycles, we can be sure the power is off. 
     // Serial.print(String(pinValue));
     if (pinValue == 1)
     {
       counter++;
-      if (counter > 4)
+      if (counter > 5)
       {
         counter = 0;
         myself->_setPowerIsOn(false);
@@ -58,7 +59,10 @@ void PumpModule::watchPumpPowerTask(void *pump)
       myself->_setPowerIsOn(true);
     }
 
-    delay(100);
+    // note that the delay value must not be an even multiple of the ac frequency, 
+    // otherwise the digital read value could always read high or low
+    // 60hz = ~16ms per cycle, 50hz - 20ms per cycle
+    delay(35);
   }
   vTaskDelete(NULL);
 }

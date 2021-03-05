@@ -283,17 +283,24 @@ void loop()
     if (rawPressurePerc < setPoint)
     {
 
-      pressurePID.SetTunings(3.75, 5.5, .5);
+      /**
+       * Note that the PID is in P_ON_M mode
+       * see: http://brettbeauregard.com/blog/2017/06/introducing-proportional-on-measurement/
+       * (p is a resistive force)
+       * TODO: only setTuning on initial transition below .2
+       */
+      // pressurePID.SetTunings(3.85, 5.6, .55);
+      pressurePID.SetTunings(3, 8, .55);
+
       // under 2 bars, transition to a roughly estimated flow-rate
       // flow will be estimated as the inverse of pressure * the pump power %
-      // float pumpPerc = (float)(pumpLevel - pumpMin) / (float)pumpRange;
       float pumpPerc = pump.getPowerIsOn() ? pump.getPumpPercent() : 0;
       float estFlow = (1 - rawPressurePerc) * pumpPerc;
       // create a differential to increase weight of flow vs pressure on PID Input, as pressure drops
       float delta = setPoint - rawPressurePerc;
       float nomalizedDelta = 1 / setPoint * delta; // scale delta to 0 - 1;
       float blendedInput = (nomalizedDelta * estFlow) + ((1 - nomalizedDelta) * rawPressurePerc);
-      //Serial.println("out: " + String(Output) + " p: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
+      Serial.println("out: " + String(Output) + " bar: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
 
       Input = blendedInput * 10.0;
     }
