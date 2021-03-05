@@ -12,9 +12,7 @@ class RotaryEncoderModuleCallbacks;
 class RotaryEncoderModule : public IEventHandler
 {
 private:
-    unsigned char encoderPin1;
-    unsigned char encoderPin2;
-    unsigned char encoderButtonPin;
+   
     ESP32Encoder encoder;
     RotaryEncoderModuleCallbacks *callbacks = nullptr;
     TaskHandle_t xHandle = NULL;
@@ -23,6 +21,9 @@ private:
 public:
     RotaryEncoderModule(unsigned char, unsigned char, unsigned char);
     ~RotaryEncoderModule();
+    unsigned char encoderPin1;
+    unsigned char encoderPin2;
+    unsigned char encoderButtonPin;
     void begin();
     static void watchEncoderTask(void *RotaryEncoderModule);
     int getPosition();

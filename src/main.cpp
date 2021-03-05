@@ -105,7 +105,8 @@ class RotartEncodeCallbacks : public RotaryEncoderModuleCallbacks
   void onEncoderChange(RotaryEncoderModule *module)
   {
     float perc = module->getPercent();
-    Serial.println("onEncoderChange: " + String(perc));
+    int raw = module->getPosition();
+    Serial.println("onEncoderChange: " + String(raw) + " - " + String(perc));
     Setpoint = perc * 10.0;
   }
 };
@@ -292,7 +293,7 @@ void loop()
       float delta = setPoint - rawPressurePerc;
       float nomalizedDelta = 1 / setPoint * delta; // scale delta to 0 - 1;
       float blendedInput = (nomalizedDelta * estFlow) + ((1 - nomalizedDelta) * rawPressurePerc);
-      Serial.println("out: " + String(Output) + " p: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
+      //Serial.println("out: " + String(Output) + " p: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
 
       Input = blendedInput * 10.0;
     }

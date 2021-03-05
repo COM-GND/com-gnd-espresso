@@ -46,16 +46,21 @@ volatile int encoderCount = encoderFullRangeRevs * encoderPulsesPerRev;
 //     }
 // };
 
-RotaryEncoderModule::RotaryEncoderModule(unsigned char encoderPin1, unsigned char encoderPin2, unsigned char encoderButtonPin)
+RotaryEncoderModule::RotaryEncoderModule(unsigned char pin1, unsigned char pin2, unsigned char buttonPin)
 {
+    encoderPin1 = pin1;
+    encoderPin2 = pin2;
+    encoderButtonPin = buttonPin;
+    pinMode(encoderButtonPin, INPUT);
     encoder.attachHalfQuad(encoderPin1, encoderPin2);
     encoder.clearCount();
-    AceButton button(encoderButtonPin);
+    button.init(buttonPin);
     ButtonConfig *buttonConfig = button.getButtonConfig();
-    // ButtonHandler handleButtonEvent;
     buttonConfig->setIEventHandler(this);
+    buttonConfig->setFeature(ButtonConfig::kFeatureClick);
 
-    Serial.println("Encoder Configured");
+
+    Serial.println("Encoder Configured - Button Pin: " + String(encoderButtonPin));
 }
 RotaryEncoderModule::~RotaryEncoderModule()
 {
@@ -65,16 +70,18 @@ RotaryEncoderModule::~RotaryEncoderModule()
     }
 }
 
+
 void RotaryEncoderModule::watchEncoderTask(void *rotaryEncoder)
 {
     RotaryEncoderModule *myself = (RotaryEncoderModule *)rotaryEncoder;
-    myself->button.check();
-
     int position = myself->getPosition();
     int oldPosition = 0;
-
+    
+    //Serial.println("ace " + String( myself->button.getPin() ) + " var "  + String(myself->encoderButtonPin));
+    
     for (;;)
     {
+        myself->button.check();
         oldPosition = position;
         position = myself->getPosition();
         if (oldPosition != position)
@@ -95,7 +102,7 @@ void RotaryEncoderModule::begin()
 void RotaryEncoderModule::handleEvent(AceButton *button, uint8_t eventType,
                                       uint8_t buttonState)
 {
-    Serial.println("Button Event " + eventType);
+    // Serial.println("Button Event " + eventType);
 
     switch (eventType)
     {
@@ -105,6 +112,7 @@ void RotaryEncoderModule::handleEvent(AceButton *button, uint8_t eventType,
             callbacks->onButtonDown(this);
         }
         break;
+    case AceButton::kEventClicked:
     case AceButton::kEventReleased:
         if (callbacks)
         {
@@ -141,7 +149,7 @@ int RotaryEncoderModule::getPosition()
 float RotaryEncoderModule::getPercent()
 {
     int pos = getPosition();
-    float perc = pos / float(encoderCount * encoderPulsesPerRev);
+    float perc = (float)pos / (float)(encoderFullRangeRevs * encoderPulsesPerRev);
     return perc;
 }
 
