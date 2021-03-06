@@ -26,7 +26,9 @@ public:
     unsigned char encoderButtonPin;
     void begin();
     static void watchEncoderTask(void *RotaryEncoderModule);
+    void setPosition(int position);
     int getPosition();
+    void setPercent(float perc);
     float getPercent();
     void setCallbacks(RotaryEncoderModuleCallbacks *callbacks);
     AceButton button;

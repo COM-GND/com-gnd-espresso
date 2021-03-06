@@ -25,13 +25,20 @@
  * GATT Characteristic and Object Type 0x2A1D Temperature Type
  */
 #define SERVICE_UUID "8fc1ceca-b162-4401-9607-c8ac21383e4e"
-#define PRESSURE_CHARACTERISTIC_ID "c14f18ef-4797-439e-a54f-498ba680291d" // standard characteristic for pressure in bars
+#define PRESSURE_SENSOR_CHAR_ID "c14f18ef-4797-439e-a54f-498ba680291d" // BT read-only characteristic for pressure sensor value in bars
+#define PRESSURE_TARGET_CHAR_ID "34c242f1-8b5f-4d99-8238-4538eb0b5764" // BT read/write characteristic for target pressure in bars
+#define PUMP_POWER_CHAR_ID "d8ad3645-50ad-4f7a-a79d-af0a59469455" // BT read-onlt characteristic for pumps power level
+
 #define BARS_UNIT_ID "2780"
 
 #define ENC_PRESSURE_MODE 0
 #define ENC_POWER_MODE 1
 
-// Pins (set for ESP32 Devkit-c; see: https://circuits4you.com/2018/12/31/esp32-wroom32-devkit-analog-read-example/)
+/** 
+ * Pins 
+ * set-up for ESP32 Devkit-c
+ * see: https://circuits4you.com/2018/12/31/esp32-wroom32-devkit-analog-read-example/)
+ */
 const unsigned char encoderPin1 = 34;      // clk
 const unsigned char encoderPin2 = 35;      // dt
 const unsigned char encoderSwitchPin = 32; // push button switch (sw)
@@ -56,22 +63,25 @@ int rawPressureRange = maxRawPressure - minRawPressure;
  * Pump Variac Globals
  */
 // Initial pump power
-volatile int pumpLevel = 0;
-volatile int lastPumpLevel = 0;
+int pumpLevel = 0;
+int lastPumpLevel = 0;
+bool pumpPowerIsOn = false;
 // The minimum value below which the pump cuts-out
-const int pumpMin = 130;
+const int pumpMin = 125;
 // DimmableLight value range is 0 - 255 - but Robotdyn seems to cut out at 100% (255)
 const int pumpMax = 254;
 const int pumpRange = pumpMax - pumpMin;
-// DimmableLight pump(pumpControlPin);
 
 PumpModule pump(pumpZeroCrossPin, pumpControlPin);
 
-
+/** 
+ * Encoder Globals
+ */
+float encoderPosition = 0;
+float lastEncoderPosition = 0;
 int encoderMode = ENC_PRESSURE_MODE;
 
 RotaryEncoderModule rotaryEncoder(encoderPin1, encoderPin2, encoderSwitchPin);
-
 
 /**
  * Bluetooth Globals
@@ -79,18 +89,20 @@ RotaryEncoderModule rotaryEncoder(encoderPin1, encoderPin2, encoderSwitchPin);
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 BLEServer *pServer = NULL;
-BLECharacteristic *pPressureCharacteristic = NULL;
+BLECharacteristic *pPressureSensorBLEChar = NULL;
+BLECharacteristic *pPressureTargetBLEChar = NULL;
+BLECharacteristic *pPumpPowerBLEChar = NULL;
 
 /**
  * Pressure PID Globals
  * https://playground.arduino.cc/Code/PIDLibrary/
  * http://brettbeauregard.com/blog/2011/04/improving-the-beginners-pid-introduction/
  */
-double Setpoint = 0;
-double Input = 0;
-double Output = 0;
+double PidSetpoint = 0;
+double PidInput = 0;
+double PidOutput = 0;
 
-PID pressurePID(&Input, &Output, &Setpoint, 3.75, 6, 1, P_ON_M, DIRECT); //P_ON_M specifies that Proportional on Measurement be used
+PID pressurePID(&PidInput, &PidOutput, &PidSetpoint, 3.75, 6, 1, P_ON_M, DIRECT); //P_ON_M specifies that Proportional on Measurement be used
 
 class RotartEncodeCallbacks : public RotaryEncoderModuleCallbacks
 {
@@ -104,10 +116,13 @@ class RotartEncodeCallbacks : public RotaryEncoderModuleCallbacks
   }
   void onEncoderChange(RotaryEncoderModule *module)
   {
-    float perc = module->getPercent();
-    int raw = module->getPosition();
-    Serial.println("onEncoderChange: " + String(raw) + " - " + String(perc));
-    Setpoint = perc * 10.0;
+    encoderPosition = module->getPercent();
+    // float perc = module->getPercent();
+    // Serial.println("onEncoderChange: " + String(raw) + " - " + String(perc));
+    // PidSetpoint = perc * 10.0;
+    // pPressureTargetBLEChar->setValue(PidSetpoint);
+    // pPressureTargetBLEChar->notify();
+    // delay(3);
   }
 };
 
@@ -116,15 +131,21 @@ class PumpCallbacks : public PumpModuleCallbacks
   void onPowerOn(PumpModule *module)
   {
     Serial.println("onPowerOn");
-    Output = 0;
+    pumpPowerIsOn = true;
+    // rotaryEncoder.setPercent(1);
+    PidOutput = pumpMax;
     pressurePID.SetMode(AUTOMATIC);
   }
 
   void onPowerOff(PumpModule *module)
   {
     Serial.println("onPowerOff");
-    Output = 0;
+    pumpPowerIsOn = false;
+    PidOutput = 0;
+    // rotaryEncoder.setPercent(0);
     pressurePID.SetMode(MANUAL);
+    // pPumpPowerBLEChar->setValue(0);
+    // pPressureTargetBLEChar->notify();
   }
 };
 
@@ -144,7 +165,7 @@ class ComGndServerCallbacks : public BLEServerCallbacks
   }
 };
 //https://learn.sparkfun.com/tutorials/esp32-thing-plus-hookup-guide/arduino-example-esp32-ble
-class PressureCallbacks : public BLECharacteristicCallbacks
+class PressureSensorBLECharCallbacks : public BLECharacteristicCallbacks
 {
   void onWrite(BLECharacteristic *pCharacteristic)
   {
@@ -152,14 +173,30 @@ class PressureCallbacks : public BLECharacteristicCallbacks
 
     if (value.length() > 0)
     {
-      Serial.println("*********");
       Serial.print("received value: ");
       for (int i = 0; i < value.length(); i++)
         Serial.print(value[i]);
 
       Serial.println();
     }
-    pCharacteristic->setValue("received " + value);
+    // pCharacteristic->setValue("received " + value);
+  }
+};
+class PressureTargetBLECharCallbacks : public BLECharacteristicCallbacks
+{
+  void onWrite(BLECharacteristic *pCharacteristic)
+  {
+    std::string value = pCharacteristic->getValue();
+
+    if (value.length() > 0)
+    {
+      Serial.print("Write Target Pressure: ");
+      for (int i = 0; i < value.length(); i++)
+        Serial.print(value[i]);
+
+      Serial.println();
+    }
+    // pCharacteristic->setValue("received " + value);
   }
 };
 
@@ -198,20 +235,33 @@ void setup()
   Serial.println("BLE Server Callback Initialized");
 
   // https://www.arduino.cc/en/Reference/ArduinoBLEBLECharacteristicBLECharacteristic
-  pPressureCharacteristic = pService->createCharacteristic(
-      PRESSURE_CHARACTERISTIC_ID,
+  pPressureSensorBLEChar = pService->createCharacteristic(
+      PRESSURE_SENSOR_CHAR_ID,
       BLECharacteristic::PROPERTY_READ |
           BLECharacteristic::PROPERTY_WRITE |
           BLECharacteristic::PROPERTY_NOTIFY |
           BLECharacteristic::PROPERTY_INDICATE);
+  Serial.println("BLE Pressure Sensor Characteristic Created");
+  // pPressureSensorBLEChar->setCallbacks(new PressureSensorBLECharCallbacks());
+  Serial.println("BLE Pressure Sensor Characteristic Callback Initialized");
+  pPressureSensorBLEChar->addDescriptor(new BLE2902());
 
-  Serial.println("BLE Pressure Characteristic Created");
+  pPressureTargetBLEChar = pService->createCharacteristic(
+      PRESSURE_TARGET_CHAR_ID,
+      BLECharacteristic::PROPERTY_READ |
+          BLECharacteristic::PROPERTY_WRITE |
+          BLECharacteristic::PROPERTY_NOTIFY |
+          BLECharacteristic::PROPERTY_INDICATE);
+  Serial.println("BLE Pressure Target Characteristic Created");
+  pPressureTargetBLEChar->setCallbacks(new PressureTargetBLECharCallbacks());
+  Serial.println("BLE Pressure Target Characteristic Callback Initialized");
+  pPressureTargetBLEChar->addDescriptor(new BLE2902());
 
-  pPressureCharacteristic->setCallbacks(new PressureCallbacks());
-
-  Serial.println("BLE Pressure Characteristic Callback Initialized");
-
-  pPressureCharacteristic->addDescriptor(new BLE2902());
+  pPumpPowerBLEChar = pService->createCharacteristic(
+      PUMP_POWER_CHAR_ID,
+      BLECharacteristic::PROPERTY_READ);
+  Serial.println("BLE Pump Power Characteristic Created");
+  pPumpPowerBLEChar->addDescriptor(new BLE2902());
 
   pService->start();
 
@@ -233,10 +283,11 @@ void setup()
 
   // Rotary Encoder
   rotaryEncoder.setCallbacks(new RotartEncodeCallbacks());
+  rotaryEncoder.setPercent(1);
   rotaryEncoder.begin();
 
   // PID
-  Setpoint = 10; // bars
+  PidSetpoint = 10; // bars
   pressurePID.SetOutputLimits(pumpMin, pumpMax);
   pressurePID.SetMode(pump.getPowerIsOn() ? AUTOMATIC : MANUAL);
 }
@@ -247,30 +298,38 @@ void setup()
 void loop()
 {
 
-  if (encoderMode == ENC_PRESSURE_MODE)
-  {
-    pumpLevel = Output;
+  // Handle Encoder
+  bool bleNotified = false;
+  if(lastEncoderPosition != encoderPosition) {
+    // Note: encoderPosition is set in RotartEncodeCallbacks
+    lastEncoderPosition = encoderPosition;
+    Serial.println("encoder: " + String(encoderPosition));
+    float scaledTargetPressure = encoderPosition * 10.0;
+    PidSetpoint = scaledTargetPressure;
+    pPressureTargetBLEChar->setValue(scaledTargetPressure);
+    pPressureTargetBLEChar->notify();
+    bleNotified = true;
   }
 
-  int lastRawPressure = rawPressure;
+  // Handle Pressure Sensor
+
   int rawPressure = analogRead(pressureSensorPin);
   int normalizeRawPressure = rawPressure - minRawPressure;
   float rawPressurePerc = (float)((float)normalizeRawPressure / (float)rawPressureRange);
   lastBarPressure = barPressure;
-  // calculate the bar pressure, rounding two 2 decimals
+
+  // Calculate the bar pressure, rounding two 2 decimals
   // TODO: this seems to result in a float like 12.1200000012345
   barPressure = roundf(rawPressurePerc * 10.0 * 100.0) / 100.0;
 
   if (lastBarPressure != barPressure)
   {
-    delay(100);
     if (deviceConnected)
     {
-      pPressureCharacteristic->setValue(barPressure);
-      pPressureCharacteristic->notify();
-      delay(3);
+      pPressureSensorBLEChar->setValue(barPressure);
+      pPressureSensorBLEChar->notify();
+      bleNotified = true;
     }
-
     // Pressure is not a useful input value when there is no resistance to the pump.
     // e.g. when the portafilter is empty, the pressure will be approaching 0, as flow approaches pump maximum.
     // ideally the system would model flow rate rather than pressure to solve this.
@@ -278,11 +337,9 @@ void loop()
     // The pump has specifications for flow at a given pressure, but not for a variable power supply
     // TODO: characterize pump flow at various power levels - this can be done once a scale
     // is integrated to measure water output accross different power levels.
-
-    const float setPoint = .2;
-    if (rawPressurePerc < setPoint)
+    const float transitionPressure = .2;
+    if (rawPressurePerc < transitionPressure)
     {
-
       /**
        * Note that the PID is in P_ON_M mode
        * see: http://brettbeauregard.com/blog/2017/06/introducing-proportional-on-measurement/
@@ -296,31 +353,49 @@ void loop()
       // flow will be estimated as the inverse of pressure * the pump power %
       float pumpPerc = pump.getPowerIsOn() ? pump.getPumpPercent() : 0;
       float estFlow = (1 - rawPressurePerc) * pumpPerc;
-      // create a differential to increase weight of flow vs pressure on PID Input, as pressure drops
-      float delta = setPoint - rawPressurePerc;
-      float nomalizedDelta = 1 / setPoint * delta; // scale delta to 0 - 1;
+      // create a differential to increase weight of flow vs pressure on PID PidInput, as pressure drops
+      float delta = transitionPressure - rawPressurePerc;
+      float nomalizedDelta = 1 / transitionPressure * delta; // scale delta to 0 - 1;
       float blendedInput = (nomalizedDelta * estFlow) + ((1 - nomalizedDelta) * rawPressurePerc);
-      Serial.println("out: " + String(Output) + " bar: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
+      //Serial.println("out: " + String(PidOutput) + " bar: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
 
-      Input = blendedInput * 10.0;
+      PidInput = blendedInput * 10.0;
     }
     else
     {
       // when pressure is above set point, let the PID act on pressure alone
-      Serial.println("Sp: " + String(Setpoint) + " O: " + String(Output) + " I: " + String(Input) + " B: " + String(rawPressurePerc));
+      //Serial.println("Sp: " + String(PidSetpoint) + " O: " + String(PidOutput) + " I: " + String(PidInput) + " B: " + String(rawPressurePerc));
       pressurePID.SetTunings(3.75, 6, 1);
-      Input = barPressure;
+      PidInput = barPressure;
+    }
+
+    Serial.println("pSp: " + String(PidSetpoint) + " pOut: " + String(PidOutput) + " pIn: " + String(PidInput) + " Bar: " + String(rawPressurePerc));
+
+  }
+  
+  // Handle Pump
+
+  if (encoderMode == ENC_PRESSURE_MODE)
+  {
+    if(pumpPowerIsOn) {
+      pumpLevel = PidOutput;
+    } else {
+      pumpLevel = 0;
     }
   }
-
   if (lastPumpLevel != pumpLevel)
   {
     // Serial.println(pumpLevel);
     lastPumpLevel = pumpLevel;
     pump.setPumpLevel(pumpLevel);
+    float pumpPerc = pump.getPumpPercent();
+    pPumpPowerBLEChar->setValue(pumpPerc);
+    pPressureTargetBLEChar->notify();
+     bleNotified = true;
   }
 
-  // disconnecting
+  // Handle BT disconnecting
+
   if (!deviceConnected && oldDeviceConnected)
   {
     delay(500);                  // give the bluetooth stack the chance to get things ready
@@ -336,4 +411,12 @@ void loop()
   }
 
   pressurePID.Compute();
+
+  // loop as fast as possible, but give ble change to catchup if anything changed
+  // TODO - consider using a xTask to notify ble characteristics at a slower rate
+  if(bleNotified) {
+    delay(50);
+  }
+  bleNotified = false;
+  
 }

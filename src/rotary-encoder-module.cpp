@@ -130,6 +130,11 @@ void RotaryEncoderModule::_handleEncoderChange(int position)
     }
 }
 
+void RotaryEncoderModule::setPosition(int position)
+{
+    encoder.setCount(position);
+}
+
 int RotaryEncoderModule::getPosition()
 {
     int encoderCount = encoder.getCount();
@@ -144,6 +149,12 @@ int RotaryEncoderModule::getPosition()
         encoderCount = encoderFullRangeRevs * encoderPulsesPerRev;
     }
     return encoderCount;
+}
+
+void RotaryEncoderModule::setPercent(float perc)
+{
+    int pos = round(perc * (float)(encoderFullRangeRevs * encoderPulsesPerRev));
+    setPosition(pos);
 }
 
 float RotaryEncoderModule::getPercent()
