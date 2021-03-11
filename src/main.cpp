@@ -27,7 +27,7 @@
 #define SERVICE_UUID "8fc1ceca-b162-4401-9607-c8ac21383e4e"
 #define PRESSURE_SENSOR_CHAR_ID "c14f18ef-4797-439e-a54f-498ba680291d" // BT read-only characteristic for pressure sensor value in bars
 #define PRESSURE_TARGET_CHAR_ID "34c242f1-8b5f-4d99-8238-4538eb0b5764" // BT read/write characteristic for target pressure in bars
-#define PUMP_POWER_CHAR_ID "d8ad3645-50ad-4f7a-a79d-af0a59469455" // BT read-onlt characteristic for pumps power level
+#define PUMP_POWER_CHAR_ID "d8ad3645-50ad-4f7a-a79d-af0a59469455"      // BT read-onlt characteristic for pumps power level
 
 #define BARS_UNIT_ID "2780"
 
@@ -133,7 +133,7 @@ class PumpCallbacks : public PumpModuleCallbacks
     Serial.println("onPowerOn");
     pumpPowerIsOn = true;
     // rotaryEncoder.setPercent(1);
-    PidOutput = pumpMax;
+    // PidOutput = pumpMax;
     pressurePID.SetMode(AUTOMATIC);
   }
 
@@ -141,7 +141,7 @@ class PumpCallbacks : public PumpModuleCallbacks
   {
     Serial.println("onPowerOff");
     pumpPowerIsOn = false;
-    PidOutput = 0;
+    // PidOutput = 0;
     // rotaryEncoder.setPercent(0);
     pressurePID.SetMode(MANUAL);
     // pPumpPowerBLEChar->setValue(0);
@@ -259,7 +259,8 @@ void setup()
 
   pPumpPowerBLEChar = pService->createCharacteristic(
       PUMP_POWER_CHAR_ID,
-      BLECharacteristic::PROPERTY_READ);
+      BLECharacteristic::PROPERTY_READ |
+          BLECharacteristic::PROPERTY_NOTIFY);
   Serial.println("BLE Pump Power Characteristic Created");
   pPumpPowerBLEChar->addDescriptor(new BLE2902());
 
@@ -300,7 +301,8 @@ void loop()
 
   // Handle Encoder
   bool bleNotified = false;
-  if(lastEncoderPosition != encoderPosition) {
+  if (lastEncoderPosition != encoderPosition)
+  {
     // Note: encoderPosition is set in RotartEncodeCallbacks
     lastEncoderPosition = encoderPosition;
     Serial.println("encoder: " + String(encoderPosition));
@@ -370,19 +372,28 @@ void loop()
     }
 
     Serial.println("pSp: " + String(PidSetpoint) + " pOut: " + String(PidOutput) + " pIn: " + String(PidInput) + " Bar: " + String(rawPressurePerc));
-
   }
-  
+
   // Handle Pump
 
-  if (encoderMode == ENC_PRESSURE_MODE)
+  if (pressurePID.GetMode() == AUTOMATIC)
   {
-    if(pumpPowerIsOn) {
-      pumpLevel = PidOutput;
-    } else {
-      pumpLevel = 0;
-    }
+    // use PID output when pid is on
+    pumpLevel = PidOutput;
   }
+  else
+  {
+    // use encoder position when pid is off. 
+    pumpLevel = (int)(encoderPosition * (float)pump.getPumpRange()) + pump.getPumpMin();
+    PidOutput = pumpLevel;
+  }
+
+  // set pump leve to 0 when pump is off. 
+  if (!pumpPowerIsOn)
+  {
+    pumpLevel = 0;
+  }
+
   if (lastPumpLevel != pumpLevel)
   {
     // Serial.println(pumpLevel);
@@ -390,8 +401,8 @@ void loop()
     pump.setPumpLevel(pumpLevel);
     float pumpPerc = pump.getPumpPercent();
     pPumpPowerBLEChar->setValue(pumpPerc);
-    pPressureTargetBLEChar->notify();
-     bleNotified = true;
+    pPumpPowerBLEChar->notify();
+    bleNotified = true;
   }
 
   // Handle BT disconnecting
@@ -414,9 +425,9 @@ void loop()
 
   // loop as fast as possible, but give ble change to catchup if anything changed
   // TODO - consider using a xTask to notify ble characteristics at a slower rate
-  if(bleNotified) {
+  if (bleNotified)
+  {
     delay(50);
   }
   bleNotified = false;
-  
 }
