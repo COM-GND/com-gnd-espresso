@@ -1,7 +1,7 @@
 #include <Arduino.h>
 /**
  * NOTE: The mains frequency must be set in ./lib/Dimmable-Light-Arduino-master/src/thyristor.h
- * It has been set 60hz for this applicatio.
+ * It has been set 60hz for this application.
  */
 #include <dimmable_light.h>
 
@@ -92,6 +92,8 @@ BLEServer *pServer = NULL;
 BLECharacteristic *pPressureSensorBLEChar = NULL;
 BLECharacteristic *pPressureTargetBLEChar = NULL;
 BLECharacteristic *pPumpPowerBLEChar = NULL;
+float blePressureTarget = 0;
+float lastBlePressureTarget = 0;
 
 /**
  * Pressure PID Globals
@@ -188,14 +190,26 @@ class PressureTargetBLECharCallbacks : public BLECharacteristicCallbacks
   {
     std::string value = pCharacteristic->getValue();
 
+    String strValue;
+
     if (value.length() > 0)
     {
-      Serial.print("Write Target Pressure: ");
-      for (int i = 0; i < value.length(); i++)
-        Serial.print(value[i]);
-
-      Serial.println();
+      Serial.print("Recieved BT Target Pressure (" + String(value.length()) + "): ");
+      
+      for (int i = 0; i < value.length(); i++) {
+          Serial.print(value[i]);
+          strValue += (char)value[i];
+      }
+      Serial.println("---");
+      Serial.println(strValue);
     }
+
+    // convert the string to a float value
+    float fValue = strtof(strValue.c_str(), NULL);
+    // Serial.println("float: " + String(fValue));
+
+    blePressureTarget = fValue;
+
     // pCharacteristic->setValue("received " + value);
   }
 };
@@ -313,6 +327,15 @@ void loop()
     bleNotified = true;
   }
 
+  // Handle Ble Target Pressure Changes
+  if(lastBlePressureTarget != blePressureTarget) {
+    lastBlePressureTarget = blePressureTarget;
+    PidSetpoint = lastBlePressureTarget;
+    rotaryEncoder.setPercent(lastBlePressureTarget/10.0);
+    pPressureTargetBLEChar->setValue(lastBlePressureTarget);
+    pPressureTargetBLEChar->notify();
+    bleNotified = true;
+  }
   // Handle Pressure Sensor
 
   int rawPressure = analogRead(pressureSensorPin);
@@ -371,7 +394,7 @@ void loop()
       PidInput = barPressure;
     }
 
-    Serial.println("pSp: " + String(PidSetpoint) + " pOut: " + String(PidOutput) + " pIn: " + String(PidInput) + " Bar: " + String(rawPressurePerc));
+    // Serial.println("pSp: " + String(PidSetpoint) + " pOut: " + String(PidOutput) + " pIn: " + String(PidInput) + " Bar: " + String(rawPressurePerc));
   }
 
   // Handle Pump
