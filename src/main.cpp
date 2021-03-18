@@ -94,7 +94,9 @@ BLECharacteristic *pPressureTargetBLEChar = NULL;
 BLECharacteristic *pPumpPowerBLEChar = NULL;
 float blePressureTarget = 0;
 float lastBlePressureTarget = 0;
-
+bool blePressureSensorNotifyFlag = false;
+bool blePressureTargetNotifyFlag = false;
+bool blePumpPowerNotifyFlag = false;
 /**
  * Pressure PID Globals
  * https://playground.arduino.cc/Code/PIDLibrary/
@@ -169,20 +171,20 @@ class ComGndServerCallbacks : public BLEServerCallbacks
 //https://learn.sparkfun.com/tutorials/esp32-thing-plus-hookup-guide/arduino-example-esp32-ble
 class PressureSensorBLECharCallbacks : public BLECharacteristicCallbacks
 {
-  void onWrite(BLECharacteristic *pCharacteristic)
-  {
-    std::string value = pCharacteristic->getValue();
+  // void onWrite(BLECharacteristic *pCharacteristic)
+  // {
+  //   std::string value = pCharacteristic->getValue();
 
-    if (value.length() > 0)
-    {
-      Serial.print("received value: ");
-      for (int i = 0; i < value.length(); i++)
-        Serial.print(value[i]);
+  //   if (value.length() > 0)
+  //   {
+  //     Serial.print("received value: ");
+  //     for (int i = 0; i < value.length(); i++)
+  //       Serial.print(value[i]);
 
-      Serial.println();
-    }
-    // pCharacteristic->setValue("received " + value);
-  }
+  //     Serial.println();
+  //   }
+  // pCharacteristic->setValue("received " + value);
+  //}
 };
 class PressureTargetBLECharCallbacks : public BLECharacteristicCallbacks
 {
@@ -195,10 +197,11 @@ class PressureTargetBLECharCallbacks : public BLECharacteristicCallbacks
     if (value.length() > 0)
     {
       Serial.print("Recieved BT Target Pressure (" + String(value.length()) + "): ");
-      
-      for (int i = 0; i < value.length(); i++) {
-          Serial.print(value[i]);
-          strValue += (char)value[i];
+
+      for (int i = 0; i < value.length(); i++)
+      {
+        Serial.print(value[i]);
+        strValue += (char)value[i];
       }
       Serial.println("---");
       Serial.println(strValue);
@@ -213,6 +216,29 @@ class PressureTargetBLECharCallbacks : public BLECharacteristicCallbacks
     // pCharacteristic->setValue("received " + value);
   }
 };
+
+void bleNotifyTask(void *params)
+{
+  for (;;)
+  {
+    if (blePressureSensorNotifyFlag)
+    {
+      pPressureSensorBLEChar->notify();
+      blePressureSensorNotifyFlag = false;
+    }
+    if (blePressureTargetNotifyFlag)
+    {
+      pPressureTargetBLEChar->notify();
+      blePressureTargetNotifyFlag = false;
+    }
+    if (blePumpPowerNotifyFlag)
+    {
+      pPumpPowerBLEChar->notify();
+      blePumpPowerNotifyFlag = false;
+    }
+    delay(100);
+  }
+}
 
 void setEncoderMode(int mode)
 {
@@ -305,6 +331,8 @@ void setup()
   PidSetpoint = 10; // bars
   pressurePID.SetOutputLimits(pumpMin, pumpMax);
   pressurePID.SetMode(pump.getPowerIsOn() ? AUTOMATIC : MANUAL);
+
+  xTaskCreate(bleNotifyTask, "bleNotify", 5000, NULL, 1, NULL);
 }
 
 /**
@@ -323,18 +351,19 @@ void loop()
     float scaledTargetPressure = encoderPosition * 10.0;
     PidSetpoint = scaledTargetPressure;
     pPressureTargetBLEChar->setValue(scaledTargetPressure);
-    pPressureTargetBLEChar->notify();
-    bleNotified = true;
+    // pPressureTargetBLEChar->notify();
+    blePressureTargetNotifyFlag = true;
   }
 
   // Handle Ble Target Pressure Changes
-  if(lastBlePressureTarget != blePressureTarget) {
+  if (lastBlePressureTarget != blePressureTarget)
+  {
     lastBlePressureTarget = blePressureTarget;
     PidSetpoint = lastBlePressureTarget;
-    rotaryEncoder.setPercent(lastBlePressureTarget/10.0);
+    rotaryEncoder.setPercent(lastBlePressureTarget / 10.0);
     pPressureTargetBLEChar->setValue(lastBlePressureTarget);
-    pPressureTargetBLEChar->notify();
-    bleNotified = true;
+    // pPressureTargetBLEChar->notify();
+    blePressureTargetNotifyFlag = true;
   }
   // Handle Pressure Sensor
 
@@ -352,8 +381,8 @@ void loop()
     if (deviceConnected)
     {
       pPressureSensorBLEChar->setValue(barPressure);
-      pPressureSensorBLEChar->notify();
-      bleNotified = true;
+      // pPressureSensorBLEChar->notify();
+      blePressureSensorNotifyFlag = true;
     }
     // Pressure is not a useful input value when there is no resistance to the pump.
     // e.g. when the portafilter is empty, the pressure will be approaching 0, as flow approaches pump maximum.
@@ -406,12 +435,12 @@ void loop()
   }
   else
   {
-    // use encoder position when pid is off. 
+    // use encoder position when pid is off.
     pumpLevel = (int)(encoderPosition * (float)pump.getPumpRange()) + pump.getPumpMin();
     PidOutput = pumpLevel;
   }
 
-  // set pump leve to 0 when pump is off. 
+  // set pump leve to 0 when pump is off.
   if (!pumpPowerIsOn)
   {
     pumpLevel = 0;
@@ -424,8 +453,9 @@ void loop()
     pump.setPumpLevel(pumpLevel);
     float pumpPerc = pump.getPumpPercent();
     pPumpPowerBLEChar->setValue(pumpPerc);
-    pPumpPowerBLEChar->notify();
-    bleNotified = true;
+    // pPumpPowerBLEChar->notify();
+    // bleNotified = true;
+    blePumpPowerNotifyFlag = true;
   }
 
   // Handle BT disconnecting
@@ -448,9 +478,9 @@ void loop()
 
   // loop as fast as possible, but give ble change to catchup if anything changed
   // TODO - consider using a xTask to notify ble characteristics at a slower rate
-  if (bleNotified)
-  {
-    delay(50);
-  }
-  bleNotified = false;
+  // if (bleNotified)
+  // {
+  //   delay(50);
+  // }
+  // bleNotified = false;
 }
