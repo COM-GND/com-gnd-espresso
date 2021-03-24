@@ -47,7 +47,7 @@ void PumpModule::watchPumpPowerTask(void *pump)
     if (pinValue == 1)
     {
       counter++;
-      if (counter > 5)
+      if (counter > 10)
       {
         counter = 0;
         myself->_setPowerIsOn(false);

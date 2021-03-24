@@ -188,6 +188,9 @@ class ComGndServerCallbacks : public BLEServerCallbacks
 //https://learn.sparkfun.com/tutorials/esp32-thing-plus-hookup-guide/arduino-example-esp32-ble
 class PressureSensorBLECharCallbacks : public BLECharacteristicCallbacks
 {
+  void onRead(BLECharacteristic *pCharacteristic) {
+   
+  }
   // void onWrite(BLECharacteristic *pCharacteristic)
   // {
   //   std::string value = pCharacteristic->getValue();
