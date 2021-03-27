@@ -108,7 +108,7 @@ int16_t pressurePidOutput = 0;
 float standardPressureP = 3.5;
 float standardPressureI = 6.0;
 float standardPressureD = 1.0;
-float standardPressurePon = 0.25;
+float standardPressurePon = 0.2;
 // const float aggressivePressureP = 3.75;
 // const float standardPressureI = 6.0;
 // const float standardPressureD = 1.0;
@@ -447,7 +447,7 @@ void loop()
       pressurePidInput = (int)(barPressure * 100.0);
     }
 
-    Serial.println("pSp: " + String(pressurePidSetpoint) + " pOut: " + String(pressurePidOutput) + " pIn: " + String(pressurePidInput) + " Bar: " + String(rawPressurePerc));
+    Serial.println("pSp: " + String(pressurePidSetpoint) + " pOut: " + String(pressurePidOutput) + " pIn: " + String(pressurePidInput) + " Bar: " + String(rawPressurePerc) + " Pump: " + String(pumpLevel));
   }
 
   // Handle Pump
@@ -467,7 +467,7 @@ void loop()
   // set pump leve to 0 when pump is off.
   if (!pumpPowerIsOn)
   {
-    pumpLevel = 0;
+    pumpLevel = -1;
   }
 
   if (lastPumpLevel != pumpLevel)
@@ -475,15 +475,17 @@ void loop()
     // Serial.println(pumpLevel);
     lastPumpLevel = pumpLevel;
     pump.setPumpLevel(pumpLevel);
-    float pumpPerc = pump.getPumpPercent();
-    pPumpPowerBLEChar->setValue(pumpPerc);
-    // pPumpPowerBLEChar->notify();
-    // bleNotified = true;
+    if(pumpPowerIsOn) {
+      float pumpPerc = pump.getPumpPercent();
+      pPumpPowerBLEChar->setValue(pumpPerc);
+    } else {
+      float powerOff = -1.0;
+      pPumpPowerBLEChar->setValue(powerOff);
+    }
     blePumpPowerNotifyFlag = true;
   }
 
   // Handle BT disconnecting
-
   if (!deviceConnected && oldDeviceConnected)
   {
     delay(500);                  // give the bluetooth stack the chance to get things ready
