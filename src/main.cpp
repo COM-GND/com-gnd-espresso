@@ -1,11 +1,11 @@
-#include <Arduino.h>
+  #include <Arduino.h>
 /**
  * NOTE: The mains frequency must be set in ./lib/Dimmable-Light-Arduino-master/src/thyristor.h
  * It has been set 60hz for this application.
  */
 #include <dimmable_light.h>
-
 #include <QuickPID.h>
+#include <ESP32AnalogRead.h>
 
 // https://github.com/nkolban/ESP32_BLE_Arduino
 #include <BLEDevice.h>
@@ -50,29 +50,34 @@ const unsigned char pressureSensorPin = 33;
 /**
  * Pressure Sensor Globals
  * Sensor range is .5 to 4.5V
- * TODO - Work out the scaling from the Resistor Divider
+ * voltage divider on sensor ouput is: 1.2k : 3.3k
+ * Dropping the voltage from 4.5v to 3.3v and .5 to .37v
+ * New output range .37v to 3.3v
 */
+ESP32AnalogRead adc;
 int rawPressure = 0;
 float lastBarPressure = 0;
 float barPressure = 0;
-const int minRawPressure = 50;   // 1bar
-const int maxRawPressure = 3300; // ~10bar
+const int minRawPressure = 37;   // .37v = 0bar
+const int maxRawPressure = 3300; // 3.3v = ~10bar
 int rawPressureRange = maxRawPressure - minRawPressure;
 
 /**
  * Pump Variac Globals
  */
 // Initial pump power
+
+PumpModule pump(pumpZeroCrossPin, pumpControlPin);
+
 int pumpLevel = 0;
 int lastPumpLevel = 0;
 bool pumpPowerIsOn = false;
 // The minimum value below which the pump cuts-out
-const int pumpMin = 125;
+// const int pumpMin = 100;
 // DimmableLight value range is 0 - 255 - but Robotdyn seems to cut out at 100% (255)
-const int pumpMax = 254;
-const int pumpRange = pumpMax - pumpMin;
+// const int pumpMax = 254;
+// const int pumpRange = pumpMax - pumpMin;
 
-PumpModule pump(pumpZeroCrossPin, pumpControlPin);
 
 /** 
  * Encoder Globals
@@ -101,18 +106,23 @@ bool blePumpPowerNotifyFlag = false;
  * Pressure PID Globals
  * https://playground.arduino.cc/Code/PIDLibrary/
  * http://brettbeauregard.com/blog/2011/04/improving-the-beginners-pid-introduction/
+ * https://github.com/Dlloydev/QuickPID
+ * https://www.crossco.com/resources/technical/how-to-tune-pid-loops/
  */
 int16_t pressurePidSetpoint = 0;
 int16_t pressurePidInput = 0;
 int16_t pressurePidOutput = 0;
-float standardPressureP = 3.5;
-float standardPressureI = 6.0;
-float standardPressureD = 1.0;
-float standardPressurePon = 0.2;
-// const float aggressivePressureP = 3.75;
-// const float standardPressureI = 6.0;
-// const float standardPressureD = 1.0;
-// const float standardPressurePon = 0.0;
+// Proportional Gain - Dependant on pOn value. A mix of proportional response to measurement vs error
+// PoM: higher value increases conservativeness
+float standardPressureP = 3.5; // testing: 1.5; 
+ // Integral Gain
+float standardPressureI = 6.0; // testing: 2.0
+// Derivitative Gain
+float standardPressureD = 1.0; // testing: 0
+// Ratio of Proportional on Measurement vs Proportional on Error
+// 0 = 100% PoM, 1 = 100% PoE
+// see: http://brettbeauregard.com/blog/2017/06/introducing-proportional-on-measurement/
+float standardPressurePon = .2; // testing: .25
 
 QuickPID pressurePID(
   &pressurePidInput,
@@ -275,6 +285,19 @@ void setEncoderMode(int mode)
 }
 
 /**
+ * Reduce ADC noise with multisampling
+ */
+int readPressureMultisample(void ) {
+  int rawPressure = 0;
+  int sampleCount = 50;
+  for(int i = 0; i < sampleCount; i++) {
+       rawPressure += adc.readMiliVolts();
+  }
+  rawPressure /= sampleCount;
+  return rawPressure;
+}
+
+/**
  * Main Setup
  */
 void setup()
@@ -282,6 +305,9 @@ void setup()
 
   Serial.begin(115200);
   Serial.println("Setup start");
+	Serial.begin(115200);
+
+  adc.attach(pressureSensorPin);
 
   pump.setCallbacks(new PumpCallbacks());
   pump.begin();
@@ -353,7 +379,7 @@ void setup()
 
   // PID
   pressurePidSetpoint = 10 * 100; // bars
-  pressurePID.SetOutputLimits(pumpMin * 100, pumpMax * 100);
+  pressurePID.SetOutputLimits(pump.getPumpMin() * 100, pump.getPumpMax() * 100);
   pressurePID.SetMode(pump.getPowerIsOn() ? AUTOMATIC : MANUAL);
 
   xTaskCreate(bleNotifyTask, "bleNotify", 5000, NULL, 1, NULL);
@@ -391,14 +417,15 @@ void loop()
   }
   // Handle Pressure Sensor
 
-  int rawPressure = analogRead(pressureSensorPin);
+  // int rawPressure = analogRead(pressureSensorPin);
+  int rawPressure = readPressureMultisample();
   int normalizeRawPressure = rawPressure - minRawPressure;
   float rawPressurePerc = (float)((float)normalizeRawPressure / (float)rawPressureRange);
   lastBarPressure = barPressure;
 
-  // Calculate the bar pressure, rounding two 2 decimals
+  // Calculate the bar pressure, rounding two 3 decimals
   // TODO: this seems to result in a float like 12.1200000012345
-  barPressure = roundf(rawPressurePerc * 10.0 * 100.0) / 100.0;
+  barPressure = roundf(rawPressurePerc * 10.0 * 1000.0) / 1000.0;
 
   if (lastBarPressure != barPressure)
   {
@@ -415,7 +442,7 @@ void loop()
     // The pump has specifications for flow at a given pressure, but not for a variable power supply
     // TODO: characterize pump flow at various power levels - this can be done once a scale
     // is integrated to measure water output accross different power levels.
-    const float transitionPressure = .05; // 1/2 bar
+    const float transitionPressure = .0125; // 1/8 bar
     if (rawPressurePerc < transitionPressure)
     {
       /**
@@ -460,8 +487,13 @@ void loop()
   else
   {
     // use encoder position when pid is off.
+
     pumpLevel = (int)(encoderPosition * (float)pump.getPumpRange()) + pump.getPumpMin();
-    pressurePidOutput = (int)(pumpLevel * 100.0);
+    if(pumpPowerIsOn) {
+          pressurePidOutput = (int)(pumpLevel * 100.0);
+    } else{
+      pressurePidOutput = pump.getPumpMin() * 100.0;
+    }
   }
 
   // set pump leve to 0 when pump is off.

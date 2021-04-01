@@ -13,7 +13,7 @@ int gPowerOn = false;
 
 PumpModule::PumpModule(int zcPin, int cntrlPin) : pump(cntrlPin)
 {
-  pumpMin = 125;
+  pumpMin = 100;
   pumpMax = 254;
   pumpRange = pumpMax - pumpMin;
   pumpLevel = pumpMax;
