@@ -48,6 +48,7 @@ volatile int encoderCount = encoderFullRangeRevs * encoderPulsesPerRev;
 
 RotaryEncoderModule::RotaryEncoderModule(unsigned char pin1, unsigned char pin2, unsigned char buttonPin)
 {
+    xHandle = NULL;
     encoderPin1 = pin1;
     encoderPin2 = pin2;
     encoderButtonPin = buttonPin;
@@ -88,7 +89,7 @@ void RotaryEncoderModule::watchEncoderTask(void *rotaryEncoder)
         {
             myself->_handleEncoderChange(position);
         }
-        delay(4);
+        vTaskDelay(4 / portTICK_PERIOD_MS);
     }
 }
 

@@ -9,6 +9,7 @@ class PumpModuleCallbacks;
 class PumpModule
 {
 private:
+    TaskHandle_t xHandle;
     int zeroCrossPin;
     int pumpMin;
     int pumpMax;
@@ -16,11 +17,13 @@ private:
     int pumpLevel;
     int oldPowerIsOn;
     int powerIsOn;
-    PumpModuleCallbacks *callbacks = nullptr;;
+    PumpModuleCallbacks *callbacks = nullptr;
+    ;
     DimmableLight pump;
 
 public:
     PumpModule(int, int);
+    ~PumpModule();
     static void watchPumpPowerTask(void *pump);
     void setZeroCrossPin(int);
     int getZeroCrossPin();
@@ -44,6 +47,7 @@ class PumpModuleCallbacks
 public:
     virtual void onPowerOn(PumpModule *module);
     virtual void onPowerOff(PumpModule *module);
+
 private:
 };
 

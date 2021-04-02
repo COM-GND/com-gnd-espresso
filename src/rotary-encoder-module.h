@@ -12,7 +12,6 @@ class RotaryEncoderModuleCallbacks;
 class RotaryEncoderModule : public IEventHandler
 {
 private:
-   
     ESP32Encoder encoder;
     RotaryEncoderModuleCallbacks *callbacks = nullptr;
     TaskHandle_t xHandle = NULL;

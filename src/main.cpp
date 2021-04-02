@@ -15,6 +15,7 @@
 
 #include "pump-module.h"
 #include "rotary-encoder-module.h"
+#include "pressure-m323-module.h"
 
 // https://btprodspecificationrefs.blob.core.windows.net/assigned-values/16-bit%20UUID%20Numbers%20Document.pdf
 /**
@@ -54,13 +55,15 @@ const unsigned char pressureSensorPin = 33;
  * Dropping the voltage from 4.5v to 3.3v and .5 to .37v
  * New output range .37v to 3.3v
 */
-ESP32AnalogRead adc;
-int rawPressure = 0;
+PressureM323Module pressureSensor(pressureSensorPin, 60);
+
+// ESP32AnalogRead adc;
+// int rawPressure = 0;
 float lastBarPressure = 0;
 float barPressure = 0;
-const int minRawPressure = 37;   // .37v = 0bar
-const int maxRawPressure = 3300; // 3.3v = ~10bar
-int rawPressureRange = maxRawPressure - minRawPressure;
+// const int minRawPressure = 37;   // .37v = 0bar
+// const int maxRawPressure = 3300; // 3.3v = ~10bar
+// int rawPressureRange = maxRawPressure - minRawPressure;
 
 /**
  * Pump Variac Globals
@@ -266,7 +269,7 @@ void bleNotifyTask(void *params)
       pPumpPowerBLEChar->notify();
       blePumpPowerNotifyFlag = false;
     }
-    delay(100);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
   }
 }
 
@@ -287,15 +290,15 @@ void setEncoderMode(int mode)
 /**
  * Reduce ADC noise with multisampling
  */
-int readPressureMultisample(void ) {
-  int rawPressure = 0;
-  int sampleCount = 10;
-  for(int i = 0; i < sampleCount; i++) {
-       rawPressure += adc.readMiliVolts();
-  }
-  rawPressure /= sampleCount;
-  return rawPressure;
-}
+// int readPressureMultisample(void ) {
+//   int rawPressure = 0;
+//   int sampleCount = 10;
+//   for(int i = 0; i < sampleCount; i++) {
+//        rawPressure += adc.readMiliVolts();
+//   }
+//   rawPressure /= sampleCount;
+//   return rawPressure;
+// }
 
 /**
  * Main Setup
@@ -307,13 +310,16 @@ void setup()
   Serial.println("Setup start");
 	Serial.begin(115200);
 
-  adc.attach(pressureSensorPin);
+  // adc.attach(pressureSensorPin);
 
   pump.setCallbacks(new PumpCallbacks());
   pump.begin();
   pump.setPumpPercent(1);
 
-  Serial.println("Pump Control Configured");
+  Serial.println("Pump Module Configured");
+
+  pressureSensor.begin();
+  Serial.println("Pressure Sensor Module Configured");
 
   BLEDevice::init("COM-GND Espresso");
   Serial.println("BLE Device Initialized");
@@ -392,7 +398,6 @@ void loop()
 {
 
   // Handle Encoder
-  bool bleNotified = false;
   if (lastEncoderPosition != encoderPosition)
   {
     // Note: encoderPosition is set in RotartEncodeCallbacks
@@ -418,14 +423,16 @@ void loop()
   // Handle Pressure Sensor
 
   // int rawPressure = analogRead(pressureSensorPin);
-  int rawPressure = readPressureMultisample();
-  int normalizeRawPressure = rawPressure - minRawPressure;
-  float rawPressurePerc = (float)((float)normalizeRawPressure / (float)rawPressureRange);
+  // int rawPressure = readPressureMultisample();
+  // int normalizeRawPressure = rawPressure - minRawPressure;
+  // float rawPressurePerc = (float)((float)normalizeRawPressure / (float)rawPressureRange);
+
   lastBarPressure = barPressure;
 
   // Calculate the bar pressure, rounding two 3 decimals
   // TODO: this seems to result in a float like 12.1200000012345
-  barPressure = roundf(rawPressurePerc * 10.0 * 1000.0) / 1000.0;
+  // barPressure = roundf(rawPressurePerc * 10.0 * 1000.0) / 1000.0;
+  barPressure = pressureSensor.getPressureBars();
 
   if (lastBarPressure != barPressure)
   {
@@ -442,40 +449,45 @@ void loop()
     // The pump has specifications for flow at a given pressure, but not for a variable power supply
     // TODO: characterize pump flow at various power levels - this can be done once a scale
     // is integrated to measure water output accross different power levels.
-    const float transitionPressure = .0125; // 1/8 bar
-    if (rawPressurePerc < transitionPressure)
-    {
-      /**
-       * Note that the PID is in P_ON_M mode
-       * see: http://brettbeauregard.com/blog/2017/06/introducing-proportional-on-measurement/
-       * (p is a resistive force)
-       * TODO: only setTuning on initial transition below .2
-       */
-      // pressurePID.SetTunings(3.85, 5.6, .55);
-      pressurePID.SetTunings(3, 8, .55, .5);
+    
+    // const float transitionPressure = .0125; // 1/8 bar
+    // if (rawPressurePerc < transitionPressure)
+    // {
+    //   /**
+    //    * Note that the PID is in P_ON_M mode
+    //    * see: http://brettbeauregard.com/blog/2017/06/introducing-proportional-on-measurement/
+    //    * (p is a resistive force)
+    //    * TODO: only setTuning on initial transition below .2
+    //    */
+    //   // pressurePID.SetTunings(3.85, 5.6, .55);
+    //   pressurePID.SetTunings(3, 8, .55, .5);
 
-      // under 2 bars, transition to a roughly estimated flow-rate
-      // flow will be estimated as the inverse of pressure * the pump power %
-      float pumpPerc = pump.getPowerIsOn() ? pump.getPumpPercent() : 0;
-      float estFlow = (1 - rawPressurePerc) * pumpPerc;
-      // create a differential to increase weight of flow vs pressure on PID pressurePidInput, as pressure drops
-      float delta = transitionPressure - rawPressurePerc;
-      float nomalizedDelta = 1 / transitionPressure * delta; // scale delta to 0 - 1;
-      float blendedInput = (nomalizedDelta * estFlow) + ((1 - nomalizedDelta) * rawPressurePerc);
-      //Serial.println("out: " + String(pressurePidOutput) + " bar: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
+    //   // under 2 bars, transition to a roughly estimated flow-rate
+    //   // flow will be estimated as the inverse of pressure * the pump power %
+    //   float pumpPerc = pump.getPowerIsOn() ? pump.getPumpPercent() : 0;
+    //   float estFlow = (1 - rawPressurePerc) * pumpPerc;
+    //   // create a differential to increase weight of flow vs pressure on PID pressurePidInput, as pressure drops
+    //   float delta = transitionPressure - rawPressurePerc;
+    //   float nomalizedDelta = 1 / transitionPressure * delta; // scale delta to 0 - 1;
+    //   float blendedInput = (nomalizedDelta * estFlow) + ((1 - nomalizedDelta) * rawPressurePerc);
+    //   //Serial.println("out: " + String(pressurePidOutput) + " bar: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
 
-      pressurePidInput = (int)(blendedInput * 10.0 * 100.0);
-    }
-    else
-    {
-      // when pressure is above set point, let the PID act on pressure alone
-      //Serial.println("Sp: " + String(pressurePidSetpoint) + " O: " + String(pressurePidOutput) + " I: " + String(pressurePidInput) + " B: " + String(rawPressurePerc));
-      pressurePID.SetTunings(standardPressureP, standardPressureI, standardPressureD, standardPressurePon);
-      pressurePidInput = (int)(barPressure * 100.0);
-    }
+    //   pressurePidInput = (int)(blendedInput * 10.0 * 100.0);
+    // }
+    // else
+    // {
+    //   // when pressure is above set point, let the PID act on pressure alone
+    //   //Serial.println("Sp: " + String(pressurePidSetpoint) + " O: " + String(pressurePidOutput) + " I: " + String(pressurePidInput) + " B: " + String(rawPressurePerc));
+    //   pressurePID.SetTunings(standardPressureP, standardPressureI, standardPressureD, standardPressurePon);
+    //   pressurePidInput = (int)(barPressure * 100.0);
+    // }
 
-    Serial.println("pSp: " + String(pressurePidSetpoint) + " pOut: " + String(pressurePidOutput) + " pIn: " + String(pressurePidInput) + " Bar: " + String(rawPressurePerc) + " Pump: " + String(pumpLevel));
+    pressurePidInput = (int)(barPressure * 100.0);
+
   }
+
+  Serial.println("pSp: " + String(pressurePidSetpoint) + " pOut: " + String(pressurePidOutput) + " pIn: " + String(pressurePidInput) + " Bar: " + String(barPressure) + " Pump: " + String(pumpLevel));
+
 
   // Handle Pump
 

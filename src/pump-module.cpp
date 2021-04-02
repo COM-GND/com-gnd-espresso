@@ -13,6 +13,7 @@ int gPowerOn = false;
 
 PumpModule::PumpModule(int zcPin, int cntrlPin) : pump(cntrlPin)
 {
+  xHandle = NULL;
   pumpMin = 100;
   pumpMax = 254;
   pumpRange = pumpMax - pumpMin;
@@ -22,6 +23,14 @@ PumpModule::PumpModule(int zcPin, int cntrlPin) : pump(cntrlPin)
   Serial.println("New PumpModule - zc pin: " + String(zcPin) + " cntrl pin: " + String(cntrlPin));
   setZeroCrossPin(zcPin);
   Serial.println("New Pump Modules");
+}
+
+PumpModule::~PumpModule()
+{
+  if (xHandle != NULL)
+  {
+    vTaskDelete(xHandle);
+  }
 }
 
 /**
@@ -42,7 +51,7 @@ void PumpModule::watchPumpPowerTask(void *pump)
 
     pinValue = digitalRead(pin);
     // pin is pulled high when power is off and is ac wave when power is on
-    // Therefor is pin holds at high for a certain number of cycles, we can be sure the power is off. 
+    // Therefor is pin holds at high for a certain number of cycles, we can be sure the power is off.
     // Serial.print(String(pinValue));
     if (pinValue == 1)
     {
@@ -59,10 +68,10 @@ void PumpModule::watchPumpPowerTask(void *pump)
       myself->_setPowerIsOn(true);
     }
 
-    // note that the delay value must not be an even multiple of the ac frequency, 
+    // note that the delay value must not be an even multiple of the ac frequency,
     // otherwise the digital read value could always read high or low
     // 60hz = ~16ms per cycle, 50hz - 20ms per cycle
-    delay(35);
+    vTaskDelay(35 / portTICK_PERIOD_MS);
   }
   vTaskDelete(NULL);
 }
@@ -88,7 +97,14 @@ void PumpModule::begin()
 {
   Serial.println("PumpModule Begin");
 
-  xTaskCreate(&PumpModule::watchPumpPowerTask, "pumpMon", 10000, this, 1, NULL);
+  xTaskCreate(
+    &PumpModule::watchPumpPowerTask,
+    "pumpMon",
+    10000,
+    this,
+    10, 
+    &xHandle
+  );
 
   DimmableLight::begin();
 }
@@ -102,13 +118,17 @@ void PumpModule::_setPowerIsOn(bool isOn)
 {
   oldPowerIsOn = powerIsOn;
   powerIsOn = isOn;
-  if(oldPowerIsOn != powerIsOn) {
-    if(powerIsOn) {
+  if (oldPowerIsOn != powerIsOn)
+  {
+    if (powerIsOn)
+    {
       callbacks->onPowerOn(this);
-    } else {
+    }
+    else
+    {
       callbacks->onPowerOff(this);
     }
-    
+
     Serial.println("Pump power: " + String(isOn));
   }
 }
