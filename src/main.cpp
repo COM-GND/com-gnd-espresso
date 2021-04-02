@@ -289,7 +289,7 @@ void setEncoderMode(int mode)
  */
 int readPressureMultisample(void ) {
   int rawPressure = 0;
-  int sampleCount = 50;
+  int sampleCount = 10;
   for(int i = 0; i < sampleCount; i++) {
        rawPressure += adc.readMiliVolts();
   }
