@@ -50,10 +50,6 @@ const unsigned char pressureSensorPin = 33;
 
 /**
  * Pressure Sensor Globals
- * Sensor range is .5 to 4.5V
- * voltage divider on sensor ouput is: 1.2k : 3.3k
- * Dropping the voltage from 4.5v to 3.3v and .5 to .37v
- * New output range .37v to 3.3v
 */
 PressureM323Module pressureSensor(pressureSensorPin, 60);
 
@@ -117,15 +113,15 @@ int16_t pressurePidInput = 0;
 int16_t pressurePidOutput = 0;
 // Proportional Gain - Dependant on pOn value. A mix of proportional response to measurement vs error
 // PoM: higher value increases conservativeness
-float standardPressureP = 3.5; // testing: 1.5; 
+float standardPressureP = 5.0; // testing: 1.5; 
  // Integral Gain
-float standardPressureI = 6.0; // testing: 2.0
+float standardPressureI = 12.0; // testing: 2.0
 // Derivitative Gain
-float standardPressureD = 1.0; // testing: 0
+float standardPressureD = 1; // testing: 0
 // Ratio of Proportional on Measurement vs Proportional on Error
 // 0 = 100% PoM, 1 = 100% PoE
 // see: http://brettbeauregard.com/blog/2017/06/introducing-proportional-on-measurement/
-float standardPressurePon = .2; // testing: .25
+float standardPressurePon = 0.1; // testing: .25
 
 QuickPID pressurePID(
   &pressurePidInput,
@@ -450,43 +446,43 @@ void loop()
     // TODO: characterize pump flow at various power levels - this can be done once a scale
     // is integrated to measure water output accross different power levels.
     
-    // const float transitionPressure = .0125; // 1/8 bar
-    // if (rawPressurePerc < transitionPressure)
-    // {
-    //   /**
-    //    * Note that the PID is in P_ON_M mode
-    //    * see: http://brettbeauregard.com/blog/2017/06/introducing-proportional-on-measurement/
-    //    * (p is a resistive force)
-    //    * TODO: only setTuning on initial transition below .2
-    //    */
-    //   // pressurePID.SetTunings(3.85, 5.6, .55);
-    //   pressurePID.SetTunings(3, 8, .55, .5);
+    const float transitionPressure = 1; // 1/8 bar
+    if (barPressure < transitionPressure)
+    {
+      /**
+       * Note that the PID is in P_ON_M mode
+       * see: http://brettbeauregard.com/blog/2017/06/introducing-proportional-on-measurement/
+       * (p is a resistive force)
+       * TODO: only setTuning on initial transition below .2
+       */
+      float pressurePerc = pressureSensor.getPressurePercent();
 
-    //   // under 2 bars, transition to a roughly estimated flow-rate
-    //   // flow will be estimated as the inverse of pressure * the pump power %
-    //   float pumpPerc = pump.getPowerIsOn() ? pump.getPumpPercent() : 0;
-    //   float estFlow = (1 - rawPressurePerc) * pumpPerc;
-    //   // create a differential to increase weight of flow vs pressure on PID pressurePidInput, as pressure drops
-    //   float delta = transitionPressure - rawPressurePerc;
-    //   float nomalizedDelta = 1 / transitionPressure * delta; // scale delta to 0 - 1;
-    //   float blendedInput = (nomalizedDelta * estFlow) + ((1 - nomalizedDelta) * rawPressurePerc);
-    //   //Serial.println("out: " + String(pressurePidOutput) + " bar: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
+      pressurePID.SetTunings(3, 8, .55, 0);
 
-    //   pressurePidInput = (int)(blendedInput * 10.0 * 100.0);
-    // }
-    // else
-    // {
-    //   // when pressure is above set point, let the PID act on pressure alone
-    //   //Serial.println("Sp: " + String(pressurePidSetpoint) + " O: " + String(pressurePidOutput) + " I: " + String(pressurePidInput) + " B: " + String(rawPressurePerc));
-    //   pressurePID.SetTunings(standardPressureP, standardPressureI, standardPressureD, standardPressurePon);
-    //   pressurePidInput = (int)(barPressure * 100.0);
-    // }
+      // flow will be estimated as the inverse of pressure * the pump power %
+      float pumpPerc = pump.getPowerIsOn() ? pump.getPumpPercent() : 0;
 
-    pressurePidInput = (int)(barPressure * 100.0);
+      float estFlow = (1 - pressurePerc) * pumpPerc;
+      // create a differential to increase weight of flow vs pressure on PID pressurePidInput, as pressure drops
+      float delta = transitionPressure - pressurePerc;
+      float nomalizedDelta = 1 / transitionPressure * delta; // scale delta to 0 - 1;
+      float blendedInput = (nomalizedDelta * estFlow) + ((1 - nomalizedDelta) * pressurePerc);
+      //Serial.println("out: " + String(pressurePidOutput) + " bar: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
+
+      pressurePidInput = (int)(blendedInput * 10.0 * 100.0);
+    }
+    else
+    {
+      // when pressure is above set point, let the PID act on pressure alone
+      //Serial.println("Sp: " + String(pressurePidSetpoint) + " O: " + String(pressurePidOutput) + " I: " + String(pressurePidInput) + " B: " + String(rawPressurePerc));
+      pressurePID.SetTunings(standardPressureP, standardPressureI, standardPressureD, standardPressurePon);
+      pressurePidInput = (int)(barPressure * 100.0);
+    }
 
   }
 
-  Serial.println("pSp: " + String(pressurePidSetpoint) + " pOut: " + String(pressurePidOutput) + " pIn: " + String(pressurePidInput) + " Bar: " + String(barPressure) + " Pump: " + String(pumpLevel));
+  int pressureMv = pressureSensor.getPressureMv();
+  Serial.println("pSp: " + String(pressurePidSetpoint) + " pOut: " + String(pressurePidOutput) + " pIn: " + String(pressurePidInput) + " pressure: " + String(pressureMv) + " Pump: " + String(pumpLevel));
 
 
   // Handle Pump

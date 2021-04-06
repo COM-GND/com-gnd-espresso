@@ -30,8 +30,11 @@ void PressureM323Module::watchPressureTask(void *instance)
     // worth of samples to get the avg pressure for one full stroke.
     // e.g. 60hz = 1000ms/60 = 16.66ms
 
-    // here we sample for two strokes
-    int sampleCount = round(1000.0 / (myself->acFreq) / 2);
+    int sampleCount = round(1000.0 / (myself->acFreq));
+    //hold moving average of 4 * 1/60th = 2/60 = 1/30th; 3/60th = 1/20th; 6/60 = 1/10th
+    const int readingCount = 6;
+    int readings[readingCount] = {};
+    int readingsIndex = 0;
 
     for (;;)
     {
@@ -47,7 +50,18 @@ void PressureM323Module::watchPressureTask(void *instance)
         newPressure /= (float)sampleCount;
         // int smoothPressure = round((newPressure + oldPressure) / 2.0);
         // Serial.println("pressure" + String(newPressure));
-        myself->_setPressureMv(round(newPressure));
+        readings[readingsIndex] = newPressure;
+        readingsIndex++;
+        if(readingsIndex >= readingCount) {
+            readingsIndex = 0;
+        }
+        float readingsAvg = 0;
+        for (int i = 0; i < readingCount; i++) {
+            readingsAvg += readings[i];
+        }
+        readingsAvg /= readingCount;
+
+        myself->_setPressureMv(round(readingsAvg));
         // vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 

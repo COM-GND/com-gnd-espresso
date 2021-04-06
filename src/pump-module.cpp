@@ -1,12 +1,10 @@
 
 /**
  * NOTE: The mains frequency must be set in ./lib/Dimmable-Light-Arduino-master/src/thyristor.h
- * It has been set 60hz for this applicatio.
+ * It has been set 60hz for this application.
  */
 
-#include <dimmable_light.h>
 #include "pump-module.h"
-// #include "pump-module-callbacks.h"
 
 int gZcPin;
 int gPowerOn = false;
@@ -14,7 +12,7 @@ int gPowerOn = false;
 PumpModule::PumpModule(int zcPin, int cntrlPin) : pump(cntrlPin)
 {
   xHandle = NULL;
-  pumpMin = 100;
+  pumpMin = 120;
   pumpMax = 254;
   pumpRange = pumpMax - pumpMin;
   pumpLevel = pumpMax;
@@ -85,7 +83,7 @@ void PumpModule::setZeroCrossPin(int zcPin)
 {
   zeroCrossPin = zcPin;
   gZcPin = zcPin;
-  DimmableLight::setSyncPin(zcPin);
+  DimmableLightLinearized::setSyncPin(zcPin);
 }
 
 int PumpModule::getZeroCrossPin()
@@ -100,13 +98,13 @@ void PumpModule::begin()
   xTaskCreate(
     &PumpModule::watchPumpPowerTask,
     "pumpMon",
-    10000,
+    15000,
     this,
     10, 
     &xHandle
   );
 
-  DimmableLight::begin();
+  DimmableLightLinearized::begin();
 }
 
 bool PumpModule::getPowerIsOn()

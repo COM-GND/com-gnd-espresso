@@ -36,13 +36,13 @@
 // If the interrupt is "too" close to the previous one, ignore the current one.
 // To define if two interrupts are too close, look at semiPeriodShrinkMargin and
 // semiPeriodExpandMargin constant
-#define FILTER_INT_PERIOD
+// #define FILTER_INT_PERIOD
 
 // FOR DEBUG PURPOSE ONLY: 
 // If the FILTER_INT_PERIOD is enabled, print on Serial the time passed 
 // from the previous interrupt. when the semi-period length is "wrong"
 // according to semiPeriodShrinkMargin and semiPeriodExpandMargin thresholds.
-//#define PRINT_INT_PERIOD
+// #define PRINT_INT_PERIOD
 
 // FOR DEBUG PURPOSE ONLY:
 // check if all the lights were managed in the last semi-period.
