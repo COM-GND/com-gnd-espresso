@@ -108,9 +108,9 @@ bool blePumpPowerNotifyFlag = false;
  * https://github.com/Dlloydev/QuickPID
  * https://www.crossco.com/resources/technical/how-to-tune-pid-loops/
  */
-int16_t pressurePidSetpoint = 0;
-int16_t pressurePidInput = 0;
-int16_t pressurePidOutput = 0;
+int pressurePidSetpoint = 0;
+int pressurePidInput = 0;
+int pressurePidOutput = 0;
 // Proportional Gain - Dependant on pOn value. A mix of proportional response to measurement vs error
 // PoM: higher value increases conservativeness
 float standardPressureP = 5.0; // testing: 1.5; 
@@ -131,7 +131,7 @@ QuickPID pressurePID(
   standardPressureI,   // Ki
   standardPressureD,    // Kd
   standardPressurePon,  // POn - Proportional on Error weighting. O = 100% Proportional on Measurement, 1 = 100% Proportional on Error
-  (bool)DIRECT
+  (uint8_t)DIRECT
 );
 
 class RotartEncodeCallbacks : public RotaryEncoderModuleCallbacks
