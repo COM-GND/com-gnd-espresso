@@ -14,18 +14,20 @@ public:
     int acFreq;
     ESP32AnalogRead adc;
     int rawTemperature; // must be static so that the RTOS task can change it
-    /*
-    Based on NTC sensor with range of -20°C to +150°C
-    */
+
     const int minRawTemperature = 0;   
-    const int maxRawTemperature = 3300; // 3.3v = ~10bar
-    int rawTemperatureRange;
-    TemperatureNtcModule(unsigned char, int);
+    const int maxRawTemperature = 3300; // 3.3v
+
+    // thermistor specs
+    // https://www.digikey.com/en/products/detail/molex/2138641635/11476089
+    int b25 = 3964;  
+    int ro = 10000; // 10k Ohm
+
+    TemperatureNtcModule(unsigned char);
     ~TemperatureNtcModule();
     static void watchTemperatureTask(void *);
     void begin(void);
     int getTemperatureMv(void);
-    float getTemperaturePercent(void);
     float getTemperatureResistance(void);
     float getTemperatureC(void);
 };

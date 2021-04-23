@@ -1,4 +1,4 @@
-  #include <Arduino.h>
+#include <Arduino.h>
 /**
  * NOTE: The mains frequency must be set in ./lib/Dimmable-Light-Arduino-master/src/thyristor.h
  * It has been set 60hz for this application.
@@ -58,8 +58,7 @@ PressureM323Module pressureSensor(pressureSensorPin, 60);
 /**
  * Boiler External NTC Temperature Sensor
  */
-TemperatureNtcModule externalBoilerTempSensor(boilerTempSensorPin ,60);
-
+TemperatureNtcModule externalBoilerTempSensor(boilerTempSensorPin);
 
 // ESP32AnalogRead adc;
 // int rawPressure = 0;
@@ -84,7 +83,6 @@ bool pumpPowerIsOn = false;
 // DimmableLight value range is 0 - 255 - but Robotdyn seems to cut out at 100% (255)
 // const int pumpMax = 254;
 // const int pumpRange = pumpMax - pumpMin;
-
 
 /** 
  * Encoder Globals
@@ -122,8 +120,8 @@ int pressurePidOutput = 0;
 // Proportional Gain - Dependant on pOn value. A mix of proportional response to measurement vs error
 // PoM: higher value increases conservativeness
 float lowPressureP = 4.0;
-float highPressureP = 5.0; // testing: 1.5; 
- // Integral Gain
+float highPressureP = 5.0; // testing: 1.5;
+                           // Integral Gain
 float lowPressureI = 1;
 float highPressureI = 12.0; // testing: 2.0
 // Derivitative Gain
@@ -136,15 +134,14 @@ float lowPressurePon = 0.2;
 float highPressurePon = 0.1; // testing: .25
 
 QuickPID pressurePID(
-  &pressurePidInput,
-  &pressurePidOutput,
-  &pressurePidSetpoint,
-  highPressureP,    // Kp
-  highPressureI,   // Ki
-  highPressureD,    // Kd
-  highPressurePon,  // POn - Proportional on Error weighting. O = 100% Proportional on Measurement, 1 = 100% Proportional on Error
-  (uint8_t)DIRECT
-);
+    &pressurePidInput,
+    &pressurePidOutput,
+    &pressurePidSetpoint,
+    highPressureP,   // Kp
+    highPressureI,   // Ki
+    highPressureD,   // Kd
+    highPressurePon, // POn - Proportional on Error weighting. O = 100% Proportional on Measurement, 1 = 100% Proportional on Error
+    (uint8_t)DIRECT);
 
 class RotartEncodeCallbacks : public RotaryEncoderModuleCallbacks
 {
@@ -209,8 +206,8 @@ class ComGndServerCallbacks : public BLEServerCallbacks
 //https://learn.sparkfun.com/tutorials/esp32-thing-plus-hookup-guide/arduino-example-esp32-ble
 class PressureSensorBLECharCallbacks : public BLECharacteristicCallbacks
 {
-  void onRead(BLECharacteristic *pCharacteristic) {
-   
+  void onRead(BLECharacteristic *pCharacteristic)
+  {
   }
   // void onWrite(BLECharacteristic *pCharacteristic)
   // {
@@ -295,7 +292,6 @@ void setEncoderMode(int mode)
   }
 }
 
-
 /**
  * Main Setup
  */
@@ -304,7 +300,7 @@ void setup()
 
   Serial.begin(115200);
   Serial.println("Setup start");
-	Serial.begin(115200);
+  Serial.begin(115200);
 
   // adc.attach(pressureSensorPin);
 
@@ -317,11 +313,10 @@ void setup()
   pressureSensor.begin();
   Serial.println("Pressure Sensor Module Configured");
 
+  // External Boiler Temperature
   externalBoilerTempSensor.begin();
   Serial.println("Temperature Sensor Module Configured");
 
-  // External Boiler Temperature
-  
   BLEDevice::init("COM-GND Espresso");
   Serial.println("BLE Device Initialized");
   pServer = BLEDevice::createServer();
@@ -450,7 +445,7 @@ void loop()
     // The pump has specifications for flow at a given pressure, but not for a variable power supply
     // TODO: characterize pump flow at various power levels - this can be done once a scale
     // is integrated to measure water output accross different power levels.
-    
+
     const float transitionPressure = .25; // 1/4 bar
     if (barPressure < transitionPressure)
     {
@@ -478,28 +473,40 @@ void loop()
 
       pressurePID.SetMode(MANUAL);
       pressurePidInput = (int)(barPressure * 100.0);
-
     }
-    else if (barPressure < 5) {
+    else if (barPressure < 5)
+    {
       pressurePID.SetMode(AUTOMATIC);
       pressurePID.SetTunings(lowPressureP, lowPressureI, lowPressureD, lowPressurePon);
       pressurePidInput = (int)(barPressure * 100.0);
     }
     else
     {
-
       // when pressure is above set point, let the PID act on pressure alone
       //Serial.println("Sp: " + String(pressurePidSetpoint) + " O: " + String(pressurePidOutput) + " I: " + String(pressurePidInput) + " B: " + String(rawPressurePerc));
       pressurePID.SetMode(AUTOMATIC);
       pressurePID.SetTunings(highPressureP, highPressureI, highPressureD, highPressurePon);
       pressurePidInput = (int)(barPressure * 100.0);
     }
-
   }
 
-  int pressureMv = pressureSensor.getPressureMv();
-  Serial.println("pSp: " + String(pressurePidSetpoint) + " pOut: " + String(pressurePidOutput) + " pIn: " + String(pressurePidInput) + " pressure: " + String(pressureMv) + " Pump: " + String(pumpLevel));
+  float temperature = externalBoilerTempSensor.getTemperatureC();
+  int tempMv = externalBoilerTempSensor.getTemperatureMv();
+  float tempR = externalBoilerTempSensor.getTemperatureResistance();
 
+  // Serial.println(
+  //   "pSp: " + String(pressurePidSetpoint) +
+  //   " pOut: " + String(pressurePidOutput) +
+  //   " pIn: " + String(pressurePidInput) +
+  //   " pressure: " + String(barPressure) +
+  //   " Pump: " + String(pumpLevel) +
+  //   " C: " + String(temperature)
+  // );
+
+  Serial.println(
+      "mv: " + String(tempMv) +
+      " r: " + String(tempR) +
+      " c: " + String(temperature));
 
   // Handle Pump
 
@@ -513,9 +520,12 @@ void loop()
     // use encoder position when pid is off.
 
     pumpLevel = (int)(encoderPosition * (float)pump.getPumpRange()) + pump.getPumpMin();
-    if(pumpPowerIsOn) {
-          pressurePidOutput = (int)(pumpLevel * 100.0);
-    } else{
+    if (pumpPowerIsOn)
+    {
+      pressurePidOutput = (int)(pumpLevel * 100.0);
+    }
+    else
+    {
       pressurePidOutput = pump.getPumpMin() * 100.0;
     }
   }
@@ -531,10 +541,13 @@ void loop()
     // Serial.println(pumpLevel);
     lastPumpLevel = pumpLevel;
     pump.setPumpLevel(pumpLevel);
-    if(pumpPowerIsOn) {
+    if (pumpPowerIsOn)
+    {
       float pumpPerc = pump.getPumpPercent();
       pPumpPowerBLEChar->setValue(pumpPerc);
-    } else {
+    }
+    else
+    {
       float powerOff = -1.0;
       pPumpPowerBLEChar->setValue(powerOff);
     }
