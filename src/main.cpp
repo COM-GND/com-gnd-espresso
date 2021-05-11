@@ -29,7 +29,8 @@
 #define SERVICE_UUID "8fc1ceca-b162-4401-9607-c8ac21383e4e"
 #define PRESSURE_SENSOR_CHAR_ID "c14f18ef-4797-439e-a54f-498ba680291d" // BT read-only characteristic for pressure sensor value in bars
 #define PRESSURE_TARGET_CHAR_ID "34c242f1-8b5f-4d99-8238-4538eb0b5764" // BT read/write characteristic for target pressure in bars
-#define PUMP_POWER_CHAR_ID "d8ad3645-50ad-4f7a-a79d-af0a59469455"      // BT read-onlt characteristic for pumps power level
+#define PUMP_POWER_CHAR_ID "d8ad3645-50ad-4f7a-a79d-af0a59469455"      // BT read-only characteristic for pumps power level
+#define TEMP_SENSOR_CHAR_ID 0x2A1C // BT read-only characteristic for boiler external temperature
 
 #define BARS_UNIT_ID "2780"
 
@@ -102,6 +103,7 @@ BLEServer *pServer = NULL;
 BLECharacteristic *pPressureSensorBLEChar = NULL;
 BLECharacteristic *pPressureTargetBLEChar = NULL;
 BLECharacteristic *pPumpPowerBLEChar = NULL;
+BLECharacteristic *pTemperatureSensorBLEChar = NULL;
 float blePressureTarget = 0;
 float lastBlePressureTarget = 0;
 bool blePressureSensorNotifyFlag = false;
@@ -356,6 +358,13 @@ void setup()
   Serial.println("BLE Pump Power Characteristic Created");
   pPumpPowerBLEChar->addDescriptor(new BLE2902());
 
+pTemperatureSensorBLEChar = pService->createCharacteristic(
+      (uint16_t)TEMP_SENSOR_CHAR_ID,
+      BLECharacteristic::PROPERTY_READ |
+          BLECharacteristic::PROPERTY_NOTIFY);
+  Serial.println("BLE Temperature Sensor Characteristic Created");
+  pTemperatureSensorBLEChar->addDescriptor(new BLE2902());
+
   pService->start();
 
   Serial.println("BLE Service Started");
@@ -507,6 +516,8 @@ void loop()
       "mv: " + String(tempMv) +
       " r: " + String(tempR) +
       " c: " + String(temperature));
+
+  pTemperatureSensorBLEChar->setValue(temperature);
 
   // Handle Pump
 
