@@ -185,10 +185,10 @@ float PumpModule::getPumpPercent()
 }
 
 /**
-     * Set the absolute pump value 
-     * Value range is between 0 and 255
-     * but cannot be less than pumpMin or larger than pumpMax
-     */
+ * Set the absolute pump value 
+ * Value range is between 0 and 255
+ * but cannot be less than pumpMin or larger than pumpMax
+ */
 void PumpModule::setPumpLevel(int level)
 {
   if (level < pumpMin)

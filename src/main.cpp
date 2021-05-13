@@ -1,3 +1,8 @@
+#define INCLUDE_uxTaskGetStackHighWaterMark 1
+#ifdef DEBUG_FREERTOS
+#include "freertos-debug-utils.h"
+#endif
+
 #include <Arduino.h>
 /**
  * NOTE: The mains frequency must be set in ./lib/Dimmable-Light-Arduino-master/src/thyristor.h
@@ -17,6 +22,7 @@
 #include "rotary-encoder-module.h"
 #include "pressure-m323-module.h"
 #include "temperature-ntc-module.h"
+#include "ssr-heater-module.h"
 
 // https://btprodspecificationrefs.blob.core.windows.net/assigned-values/16-bit%20UUID%20Numbers%20Document.pdf
 /**
@@ -30,13 +36,15 @@
 #define PRESSURE_SENSOR_CHAR_ID "c14f18ef-4797-439e-a54f-498ba680291d" // BT read-only characteristic for pressure sensor value in bars
 #define PRESSURE_TARGET_CHAR_ID "34c242f1-8b5f-4d99-8238-4538eb0b5764" // BT read/write characteristic for target pressure in bars
 #define PUMP_POWER_CHAR_ID "d8ad3645-50ad-4f7a-a79d-af0a59469455"      // BT read-only characteristic for pumps power level
-#define TEMP_SENSOR_CHAR_ID 0x2A1C // BT read-only characteristic for boiler external temperature
+#define TEMP_SENSOR_CHAR_ID 0x2A1C                                     // BT read-only characteristic for boiler external temperature
 
 #define BARS_UNIT_ID "2780"
 
 #define ENC_PRESSURE_MODE 0
 #define ENC_POWER_MODE 1
 
+// The cycle time of the boiler Heater SSR
+#define HEATER_SSR_PERIOD_MS 2000
 /** 
  * Pins 
  * set-up for ESP32 Devkit-c
@@ -49,8 +57,9 @@ const unsigned char pumpZeroCrossPin = 14; // zc
 const unsigned char pumpControlPin = 12;
 // ADC Channel 1 must be used when Esp32 WiFi or BT is active
 const unsigned char pressureSensorPin = 33;
-
 const unsigned char boilerTempSensorPin = 32;
+const unsigned char boilerTempControlPin = 35;
+
 /**
  * Pressure Sensor Globals
 */
@@ -116,9 +125,9 @@ bool blePumpPowerNotifyFlag = false;
  * https://github.com/Dlloydev/QuickPID
  * https://www.crossco.com/resources/technical/how-to-tune-pid-loops/
  */
-int pressurePidSetpoint = 0;
-int pressurePidInput = 0;
-int pressurePidOutput = 0;
+float pressurePidSetpoint = 0;
+float pressurePidInput = 0;
+float pressurePidOutput = 0;
 // Proportional Gain - Dependant on pOn value. A mix of proportional response to measurement vs error
 // PoM: higher value increases conservativeness
 float lowPressureP = 4.0;
@@ -143,7 +152,27 @@ QuickPID pressurePID(
     highPressureI,   // Ki
     highPressureD,   // Kd
     highPressurePon, // POn - Proportional on Error weighting. O = 100% Proportional on Measurement, 1 = 100% Proportional on Error
-    (uint8_t)DIRECT);
+    QuickPID::DIRECT);
+
+/**
+ * Temperature PID Globals
+ */
+
+SsrHeaterModule ssrHeater(boilerTempControlPin, HEATER_SSR_PERIOD_MS);
+
+float tempPidSetpoint = 93.0; /* celcius */
+float tempPidInput = 0;
+float tempPidOutput = 0;
+
+QuickPID tempPID(
+    &tempPidInput,
+    &tempPidOutput,
+    &tempPidSetpoint,
+    5, // Kp
+    4, // Ki
+    0, // Kd
+    0, // POn - Proportional on Error weighting. O = 100% Proportional on Measurement, 1 = 100% Proportional on Error
+    QuickPID::DIRECT);
 
 class RotartEncodeCallbacks : public RotaryEncoderModuleCallbacks
 {
@@ -175,7 +204,7 @@ class PumpCallbacks : public PumpModuleCallbacks
     pumpPowerIsOn = true;
     // rotaryEncoder.setPercent(1);
     // pressurePidOutput = pumpMax;
-    pressurePID.SetMode(AUTOMATIC);
+    pressurePID.SetMode(QuickPID::AUTOMATIC);
   }
 
   void onPowerOff(PumpModule *module)
@@ -184,7 +213,7 @@ class PumpCallbacks : public PumpModuleCallbacks
     pumpPowerIsOn = false;
     // pressurePidOutput = 0;
     // rotaryEncoder.setPercent(0);
-    pressurePID.SetMode(MANUAL);
+    pressurePID.SetMode(QuickPID::MANUAL);
     // pPumpPowerBLEChar->setValue(0);
     // pPressureTargetBLEChar->notify();
   }
@@ -285,12 +314,12 @@ void setEncoderMode(int mode)
   if (mode == ENC_POWER_MODE)
   {
     encoderMode = ENC_POWER_MODE;
-    pressurePID.SetMode(MANUAL);
+    pressurePID.SetMode(QuickPID::MANUAL);
   }
   else
   {
     encoderMode = ENC_PRESSURE_MODE;
-    pressurePID.SetMode(AUTOMATIC);
+    pressurePID.SetMode(QuickPID::AUTOMATIC);
   }
 }
 
@@ -318,6 +347,14 @@ void setup()
   // External Boiler Temperature
   externalBoilerTempSensor.begin();
   Serial.println("Temperature Sensor Module Configured");
+
+  // Boiler Heater SSR Control
+  ssrHeater.setDutyCycleMs(900);
+  ssrHeater.begin();
+  Serial.println("Boiler Heater SSR Module Configured");
+
+  tempPID.SetOutputLimits(0, 1.0);
+  tempPID.SetMode(QuickPID::AUTOMATIC);
 
   BLEDevice::init("COM-GND Espresso");
   Serial.println("BLE Device Initialized");
@@ -358,7 +395,7 @@ void setup()
   Serial.println("BLE Pump Power Characteristic Created");
   pPumpPowerBLEChar->addDescriptor(new BLE2902());
 
-pTemperatureSensorBLEChar = pService->createCharacteristic(
+  pTemperatureSensorBLEChar = pService->createCharacteristic(
       (uint16_t)TEMP_SENSOR_CHAR_ID,
       BLECharacteristic::PROPERTY_READ |
           BLECharacteristic::PROPERTY_NOTIFY);
@@ -391,7 +428,7 @@ pTemperatureSensorBLEChar = pService->createCharacteristic(
   // Pressure PID
   pressurePidSetpoint = 10 * 100; // bars
   pressurePID.SetOutputLimits(pump.getPumpMin() * 100, pump.getPumpMax() * 100);
-  pressurePID.SetMode(pump.getPowerIsOn() ? AUTOMATIC : MANUAL);
+  pressurePID.SetMode(pump.getPowerIsOn() ? QuickPID::AUTOMATIC : QuickPID::MANUAL);
 
   xTaskCreate(bleNotifyTask, "bleNotify", 5000, NULL, 1, NULL);
 }
@@ -480,12 +517,12 @@ void loop()
 
       // pressurePidInput = (int)(blendedInput * 10.0 * 100.0);
 
-      pressurePID.SetMode(MANUAL);
+      pressurePID.SetMode(QuickPID::MANUAL);
       pressurePidInput = (int)(barPressure * 100.0);
     }
     else if (barPressure < 5)
     {
-      pressurePID.SetMode(AUTOMATIC);
+      pressurePID.SetMode(QuickPID::AUTOMATIC);
       pressurePID.SetTunings(lowPressureP, lowPressureI, lowPressureD, lowPressurePon);
       pressurePidInput = (int)(barPressure * 100.0);
     }
@@ -493,7 +530,7 @@ void loop()
     {
       // when pressure is above set point, let the PID act on pressure alone
       //Serial.println("Sp: " + String(pressurePidSetpoint) + " O: " + String(pressurePidOutput) + " I: " + String(pressurePidInput) + " B: " + String(rawPressurePerc));
-      pressurePID.SetMode(AUTOMATIC);
+      pressurePID.SetMode(QuickPID::AUTOMATIC);
       pressurePID.SetTunings(highPressureP, highPressureI, highPressureD, highPressurePon);
       pressurePidInput = (int)(barPressure * 100.0);
     }
@@ -503,6 +540,14 @@ void loop()
   int tempMv = externalBoilerTempSensor.getTemperatureMv();
   float tempR = externalBoilerTempSensor.getTemperatureResistance();
 
+  tempPidInput = temperature;
+  ssrHeater.setDutyCyclePercent(tempPidOutput);
+  Serial.println(
+    "tSp: " + String(tempPidSetpoint) + 
+    " tOut: " + String(tempPidOutput) + 
+    " tIn: " + String(tempPidInput) +
+    " C " + String(temperature)
+  );
   // Serial.println(
   //   "pSp: " + String(pressurePidSetpoint) +
   //   " pOut: " + String(pressurePidOutput) +
@@ -512,16 +557,16 @@ void loop()
   //   " C: " + String(temperature)
   // );
 
-  Serial.println(
-      "mv: " + String(tempMv) +
-      " r: " + String(tempR) +
-      " c: " + String(temperature));
+  // Serial.println(
+  //     "mv: " + String(tempMv) +
+  //     " r: " + String(tempR) +
+  //     " c: " + String(temperature));
 
   pTemperatureSensorBLEChar->setValue(temperature);
 
   // Handle Pump
 
-  if (pressurePID.GetMode() == AUTOMATIC)
+  if (pressurePID.GetMode() == QuickPID::AUTOMATIC)
   {
     // use PID output when pid is on
     pumpLevel = (float)(pressurePidOutput / 100.0);
@@ -541,7 +586,7 @@ void loop()
     }
   }
 
-  // set pump leve to 0 when pump is off.
+  // set pump level to 0 when pump is off.
   if (!pumpPowerIsOn)
   {
     pumpLevel = -1;
@@ -581,12 +626,12 @@ void loop()
   }
 
   pressurePID.Compute();
+  tempPID.Compute();
 
-  // loop as fast as possible, but give ble change to catchup if anything changed
-  // TODO - consider using a xTask to notify ble characteristics at a slower rate
-  // if (bleNotified)
-  // {
-  //   delay(50);
-  // }
-  // bleNotified = false;
+#ifdef DEBUG_FREERTOS
+  char *rtos_debug_buff;
+  vTaskGetRunTimeStats(rtos_debug_buff);
+  // rtos_debug_buff += '\0';
+  Serial.print(rtos_debug_buff);
+#endif
 }

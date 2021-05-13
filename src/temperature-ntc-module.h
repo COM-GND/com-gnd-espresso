@@ -19,8 +19,8 @@ public:
     const int maxRawTemperature = 3300; // 3.3v
 
     // thermistor specs
-    // https://www.digikey.com/en/products/detail/molex/2138641635/11476089
-    int b25 = 3964;  
+    // https://www.mouser.com/ProductDetail/vishay/ntcalug02a103f/?qs=AtFvwFU%2F1FnuJdiGNBrReQ%3D%3D&countrycode=US&currencycode=USD
+    int b25 = 3984;  
     int ro = 10000; // 10k Ohm
 
     TemperatureNtcModule(unsigned char);
