@@ -8,8 +8,8 @@ class SsrHeaterModule
 private:
     TaskHandle_t xHandle;
     unsigned char ssrControlPin;
-    unsigned int cyclePeriod;
-    unsigned int dutyPeriod;
+    unsigned int cyclePeriod = 2000;
+    unsigned int dutyPeriod = 1000;
 
 public:
     SsrHeaterModule(unsigned char ssrControlPin, unsigned int);

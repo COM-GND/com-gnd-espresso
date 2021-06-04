@@ -4,6 +4,7 @@
 #endif
 
 #include <Arduino.h>
+#include <Wire.h>
 /**
  * NOTE: The mains frequency must be set in ./lib/Dimmable-Light-Arduino-master/src/thyristor.h
  * It has been set 60hz for this application.
@@ -43,8 +44,9 @@
 #define ENC_PRESSURE_MODE 0
 #define ENC_POWER_MODE 1
 
+
 // The cycle time of the boiler Heater SSR
-#define HEATER_SSR_PERIOD_MS 2000
+#define HEATER_SSR_PERIOD_MS 1000
 /** 
  * Pins 
  * set-up for ESP32 Devkit-c
@@ -53,12 +55,29 @@
 const unsigned char encoderPin1 = 25;      // clk
 const unsigned char encoderPin2 = 26;      // dt
 const unsigned char encoderSwitchPin = 27; // push button switch (sw)
-const unsigned char pumpZeroCrossPin = 14; // zc
-const unsigned char pumpControlPin = 12;
+const unsigned char pumpZeroCrossPin = 18;//14; // zc
+const unsigned char pumpControlPin =  19;//12;
 // ADC Channel 1 must be used when Esp32 WiFi or BT is active
+// NOTE: Pins 34 to 39 are input only
 const unsigned char pressureSensorPin = 33;
 const unsigned char boilerTempSensorPin = 32;
-const unsigned char boilerTempControlPin = 35;
+const unsigned char boilerTempControlPin = 17;//13;
+
+// I2C bus
+// SDA / SCL Require Pull-up resistors to VDD
+// Typical pullup value is 4.7k for 5V
+// note that the 5V <-> 3.3v level shifter has 10K pull-up resistor installed
+// https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/i2c.html
+// https://learn.sparkfun.com/tutorials/bi-directional-logic-level-converter-hookup-guide
+// https://www.arduino.cc/en/reference/wire
+
+const unsigned char i2cSda = 23;  // i2c data line
+const unsigned char i2cScl = 22;  // i2c clock line
+
+/**
+ * I2C Globals
+ */
+TwoWire I2C = TwoWire(0);
 
 /**
  * Pressure Sensor Globals
@@ -169,10 +188,11 @@ QuickPID tempPID(
     &tempPidOutput,
     &tempPidSetpoint,
     5, // Kp
-    4, // Ki
+    1, // Ki
     0, // Kd
     0, // POn - Proportional on Error weighting. O = 100% Proportional on Measurement, 1 = 100% Proportional on Error
     QuickPID::DIRECT);
+
 
 class RotartEncodeCallbacks : public RotaryEncoderModuleCallbacks
 {
@@ -333,7 +353,7 @@ void setup()
   Serial.println("Setup start");
   Serial.begin(115200);
 
-  // adc.attach(pressureSensorPin);
+  I2C.begin(i2cSda, i2cScl, 100000);
 
   pump.setCallbacks(new PumpCallbacks());
   pump.begin();
@@ -349,11 +369,11 @@ void setup()
   Serial.println("Temperature Sensor Module Configured");
 
   // Boiler Heater SSR Control
-  ssrHeater.setDutyCycleMs(900);
+  // ssrHeater.setDutyCyclePercent(.5));
   ssrHeater.begin();
   Serial.println("Boiler Heater SSR Module Configured");
 
-  tempPID.SetOutputLimits(0, 1.0);
+  tempPID.SetOutputLimits(0.0, 100.0);
   tempPID.SetMode(QuickPID::AUTOMATIC);
 
   BLEDevice::init("COM-GND Espresso");
@@ -519,12 +539,16 @@ void loop()
 
       pressurePID.SetMode(QuickPID::MANUAL);
       pressurePidInput = (int)(barPressure * 100.0);
+
+      tempPID.SetMode(QuickPID::AUTOMATIC);
     }
     else if (barPressure < 5)
     {
       pressurePID.SetMode(QuickPID::AUTOMATIC);
       pressurePID.SetTunings(lowPressureP, lowPressureI, lowPressureD, lowPressurePon);
       pressurePidInput = (int)(barPressure * 100.0);
+
+      tempPID.SetMode(QuickPID::AUTOMATIC);
     }
     else
     {
@@ -533,6 +557,13 @@ void loop()
       pressurePID.SetMode(QuickPID::AUTOMATIC);
       pressurePID.SetTunings(highPressureP, highPressureI, highPressureD, highPressurePon);
       pressurePidInput = (int)(barPressure * 100.0);
+
+      // Force the heater to 100% duty cycle when pump is running at high pressure
+      // We do this to reduce electrical noise when their is a high power draw within
+      // It will smooth out the pressure and head-off water temperature drops during
+      // high flow rates
+      tempPID.SetMode(QuickPID::MANUAL);
+      tempPidOutput = 100.0;
     }
   }
 
@@ -541,13 +572,12 @@ void loop()
   float tempR = externalBoilerTempSensor.getTemperatureResistance();
 
   tempPidInput = temperature;
-  ssrHeater.setDutyCyclePercent(tempPidOutput);
+  ssrHeater.setDutyCyclePercent((float)(tempPidOutput / 100.0));
   Serial.println(
-    "tSp: " + String(tempPidSetpoint) + 
-    " tOut: " + String(tempPidOutput) + 
-    " tIn: " + String(tempPidInput) +
-    " C " + String(temperature)
-  );
+      "tSp: " + String(tempPidSetpoint) +
+      " tOut: " + String(tempPidOutput) +
+      " tIn: " + String(tempPidInput) +
+      " C " + String(temperature));
   // Serial.println(
   //   "pSp: " + String(pressurePidSetpoint) +
   //   " pOut: " + String(pressurePidOutput) +

@@ -44,14 +44,14 @@ void SsrHeaterModule::setDutyCyclePercent(float percent) {
     }
 
     unsigned int dutyTime = (unsigned int)(percent * (float)cyclePeriod);
-    Serial.println("setDutyCyclePercent: " + String(percent));
+    // Serial.println("setDutyCyclePercent: " + String(percent));
 
     setDutyCycleMs(dutyTime);
 }
 
 void SsrHeaterModule::setDutyCycleMs(unsigned int ms)
 {
-    Serial.println("setDutyCycleMs: " + String(ms));
+    // Serial.println("setDutyCycleMs: " + String(ms));
     dutyPeriod = ms;
 }
 
@@ -67,12 +67,12 @@ unsigned int SsrHeaterModule::getCyclePeriodMs()
 
 void SsrHeaterModule::setSsrHigh() {
     Serial.println("setSsrHigh");
-    //digitalWrite(ssrControlPin, HIGH);
+    digitalWrite(ssrControlPin, HIGH);
 }
 
 void SsrHeaterModule::setSsrLow() {
     Serial.println("setSsrLow");
-    //digitalWrite(ssrControlPin, LOW);
+    digitalWrite(ssrControlPin, LOW);
 }
 
 void SsrHeaterModule::ssrHeaterModuleTask(void *pSelf)
@@ -91,16 +91,20 @@ void SsrHeaterModule::ssrHeaterModuleTask(void *pSelf)
     for (;;)
     {
         unsigned int dutyCycleMs = myself->getDutyCycleMs();
-        // min delay must be greater than 0 for vTaskDelayUntil
-        dutyCycleMs += 10;
+
         TickType_t onTime = dutyCycleMs > 0 ? (dutyCycleMs / portTICK_PERIOD_MS) : 0;
         TickType_t offTime = (periodMs - dutyCycleMs) / portTICK_PERIOD_MS;
-        Serial.println("on hw: "  + String(onTime) + " m: " + String(highwater));
-        myself->setSsrHigh();
-        vTaskDelayUntil(&xLastWakeTime, onTime);
+
+        if(onTime > 0){
+            Serial.println("on hw: "  + String(onTime) + " m: " + String(highwater));
+            myself->setSsrHigh();
+            vTaskDelayUntil(&xLastWakeTime, onTime);
+        }
+        if(offTime > 0){
+            Serial.println("off hw: " + String(offTime) + " m: " + String(highwater));
+            myself->setSsrLow();
+            vTaskDelayUntil(&xLastWakeTime, offTime);
+        }
         highwater = uxTaskGetStackHighWaterMark(NULL);
-        Serial.println("off hw: " + String(offTime) + " m: " + String(highwater));
-        myself->setSsrLow();
-        vTaskDelayUntil(&xLastWakeTime, offTime);
     }
 }
