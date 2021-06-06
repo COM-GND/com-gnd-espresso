@@ -24,6 +24,7 @@
 #include "pressure-m323-module.h"
 #include "temperature-ntc-module.h"
 #include "ssr-heater-module.h"
+#include "flow-fs2012-module.h"
 
 // https://btprodspecificationrefs.blob.core.windows.net/assigned-values/16-bit%20UUID%20Numbers%20Document.pdf
 /**
@@ -44,9 +45,9 @@
 #define ENC_PRESSURE_MODE 0
 #define ENC_POWER_MODE 1
 
-
 // The cycle time of the boiler Heater SSR
 #define HEATER_SSR_PERIOD_MS 1000
+
 /** 
  * Pins 
  * set-up for ESP32 Devkit-c
@@ -55,13 +56,13 @@
 const unsigned char encoderPin1 = 25;      // clk
 const unsigned char encoderPin2 = 26;      // dt
 const unsigned char encoderSwitchPin = 27; // push button switch (sw)
-const unsigned char pumpZeroCrossPin = 18;//14; // zc
-const unsigned char pumpControlPin =  19;//12;
+const unsigned char pumpZeroCrossPin = 18; // zc
+const unsigned char pumpControlPin =  19;  // pwm
 // ADC Channel 1 must be used when Esp32 WiFi or BT is active
 // NOTE: Pins 34 to 39 are input only
-const unsigned char pressureSensorPin = 33;
-const unsigned char boilerTempSensorPin = 32;
-const unsigned char boilerTempControlPin = 17;//13;
+const unsigned char pressureSensorPin = 33;    // pressure sensor analog output -> adc
+const unsigned char boilerTempSensorPin = 32;  // thermistor -> adc
+const unsigned char boilerTempControlPin = 17; // GPIO to SSR
 
 // I2C bus
 // SDA / SCL Require Pull-up resistors to VDD
@@ -78,6 +79,11 @@ const unsigned char i2cScl = 22;  // i2c clock line
  * I2C Globals
  */
 TwoWire I2C = TwoWire(0);
+
+/**
+ * Flow Sensor Globals
+ */
+FlowFs2012Module flowSensor(&I2C);
 
 /**
  * Pressure Sensor Globals
