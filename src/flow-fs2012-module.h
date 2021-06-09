@@ -12,11 +12,14 @@ private:
     void _setRawFlowRate(int);
     TwoWire *I2C;
     int rawFlowRate = 0;
+
 public:
     FlowFs2012Module(TwoWire *twoWire);
+    ~FlowFs2012Module();
     static void watchFlowTask(void *);
     void begin(void);
     int getRawFlowRate(void);
+    int readSensor(void);
     float getFlowRateMlPerMin(void);
     TwoWire * getI2cInstance(void);
 };

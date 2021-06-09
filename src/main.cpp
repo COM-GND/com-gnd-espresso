@@ -359,7 +359,10 @@ void setup()
   Serial.println("Setup start");
   Serial.begin(115200);
 
+  // flow sensor support 100k and 400k freq
   I2C.begin(i2cSda, i2cScl, 100000);
+  
+  // flowSensor.begin();
 
   pump.setCallbacks(new PumpCallbacks());
   pump.begin();
@@ -464,6 +467,8 @@ void setup()
  */
 void loop()
 {
+
+  int flow = flowSensor.readSensor();
 
   // Handle Encoder
   if (lastEncoderPosition != encoderPosition)
@@ -579,11 +584,11 @@ void loop()
 
   tempPidInput = temperature;
   ssrHeater.setDutyCyclePercent((float)(tempPidOutput / 100.0));
-  Serial.println(
-      "tSp: " + String(tempPidSetpoint) +
-      " tOut: " + String(tempPidOutput) +
-      " tIn: " + String(tempPidInput) +
-      " C " + String(temperature));
+  // Serial.println(
+  //     "tSp: " + String(tempPidSetpoint) +
+  //     " tOut: " + String(tempPidOutput) +
+  //     " tIn: " + String(tempPidInput) +
+  //     " C " + String(temperature));
   // Serial.println(
   //   "pSp: " + String(pressurePidSetpoint) +
   //   " pOut: " + String(pressurePidOutput) +
@@ -597,6 +602,8 @@ void loop()
   //     "mv: " + String(tempMv) +
   //     " r: " + String(tempR) +
   //     " c: " + String(temperature));
+
+  // Serial.println("flow" + String(flowSensor.getRawFlowRate());
 
   pTemperatureSensorBLEChar->setValue(temperature);
 
