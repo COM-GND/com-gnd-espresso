@@ -39,7 +39,7 @@
 #define PRESSURE_TARGET_CHAR_ID "34c242f1-8b5f-4d99-8238-4538eb0b5764" // BT read/write characteristic for target pressure in bars
 #define PUMP_POWER_CHAR_ID "d8ad3645-50ad-4f7a-a79d-af0a59469455"      // BT read-only characteristic for pumps power level
 #define TEMP_SENSOR_CHAR_ID 0x2A1C                                     // BT read-only characteristic for boiler external temperature
-
+#define FLOW_SENSOR_CHAR_ID "f5ec47c3-b240-49e8-a7c8-1b5fe5537cde"     // BT read-only characteristic for in-flow rate
 #define BARS_UNIT_ID "2780"
 
 #define ENC_PRESSURE_MODE 0
@@ -84,6 +84,7 @@ TwoWire I2C = TwoWire(0);
  * Flow Sensor Globals
  */
 FlowFs2012Module flowSensor(&I2C);
+float lastFlow = 0.0;
 
 /**
  * Pressure Sensor Globals
@@ -138,6 +139,8 @@ BLECharacteristic *pPressureSensorBLEChar = NULL;
 BLECharacteristic *pPressureTargetBLEChar = NULL;
 BLECharacteristic *pPumpPowerBLEChar = NULL;
 BLECharacteristic *pTemperatureSensorBLEChar = NULL;
+BLECharacteristic *pFlowSensorBLEChar = NULL;
+
 float blePressureTarget = 0;
 float lastBlePressureTarget = 0;
 bool blePressureSensorNotifyFlag = false;
@@ -159,10 +162,10 @@ float lowPressureP = 4.0;
 float highPressureP = 5.0; // testing: 1.5;
                            // Integral Gain
 float lowPressureI = 1;
-float highPressureI = 12.0; // testing: 2.0
+float highPressureI = 12.0;
 // Derivitative Gain
 float lowPressureD = 1;
-float highPressureD = 1; // testing: 0
+float highPressureD = 1;
 // Ratio of Proportional on Measurement vs Proportional on Error
 // 0 = 100% PoM, 1 = 100% PoE
 // see: http://brettbeauregard.com/blog/2017/06/introducing-proportional-on-measurement/
@@ -362,7 +365,7 @@ void setup()
   // flow sensor support 100k and 400k freq
   I2C.begin(i2cSda, i2cScl, 100000);
   
-  // flowSensor.begin();
+  flowSensor.begin();
 
   pump.setCallbacks(new PumpCallbacks());
   pump.begin();
@@ -431,6 +434,14 @@ void setup()
   Serial.println("BLE Temperature Sensor Characteristic Created");
   pTemperatureSensorBLEChar->addDescriptor(new BLE2902());
 
+  pFlowSensorBLEChar = pService->createCharacteristic(
+      FLOW_SENSOR_CHAR_ID,
+      BLECharacteristic::PROPERTY_READ |
+          BLECharacteristic::PROPERTY_NOTIFY);
+  Serial.println("BLE Temperature Sensor Characteristic Created");
+  pFlowSensorBLEChar->addDescriptor(new BLE2902());
+  // pFlowSensorBLEChar->setValue(0);
+
   pService->start();
 
   Serial.println("BLE Service Started");
@@ -468,7 +479,11 @@ void setup()
 void loop()
 {
 
-  int flow = flowSensor.readSensor();
+  float flow = flowSensor.getFlowRateMlPerMin();
+  Serial.println("flow: " + String(flow));
+  if(flow != lastFlow) {
+    pFlowSensorBLEChar->setValue(flow);
+  }
 
   // Handle Encoder
   if (lastEncoderPosition != encoderPosition)
