@@ -25,6 +25,7 @@
 #include "temperature-ntc-module.h"
 #include "ssr-heater-module.h"
 #include "flow-fs2012-module.h"
+#include "flow-hx711-module.h"
 
 // https://btprodspecificationrefs.blob.core.windows.net/assigned-values/16-bit%20UUID%20Numbers%20Document.pdf
 /**
@@ -57,12 +58,16 @@ const unsigned char encoderPin1 = 25;      // clk
 const unsigned char encoderPin2 = 26;      // dt
 const unsigned char encoderSwitchPin = 27; // push button switch (sw)
 const unsigned char pumpZeroCrossPin = 18; // zc
-const unsigned char pumpControlPin =  19;  // pwm
+const unsigned char pumpControlPin = 19;   // pwm
 // ADC Channel 1 must be used when Esp32 WiFi or BT is active
 // NOTE: Pins 34 to 39 are input only
 const unsigned char pressureSensorPin = 33;    // pressure sensor analog output -> adc
 const unsigned char boilerTempSensorPin = 32;  // thermistor -> adc
 const unsigned char boilerTempControlPin = 17; // GPIO to SSR
+
+// Inflow scale HX711 control pins
+const unsigned char flowHx711DoutPin = 16;
+const unsigned char flowHx711SckPin = 4;
 
 // I2C bus
 // SDA / SCL Require Pull-up resistors to VDD
@@ -72,8 +77,8 @@ const unsigned char boilerTempControlPin = 17; // GPIO to SSR
 // https://learn.sparkfun.com/tutorials/bi-directional-logic-level-converter-hookup-guide
 // https://www.arduino.cc/en/reference/wire
 
-const unsigned char i2cSda = 23;  // i2c data line
-const unsigned char i2cScl = 22;  // i2c clock line
+const unsigned char i2cSda = 23; // i2c data line
+const unsigned char i2cScl = 22; // i2c clock line
 
 /**
  * I2C Globals
@@ -81,8 +86,14 @@ const unsigned char i2cScl = 22;  // i2c clock line
 TwoWire I2C = TwoWire(0);
 
 /**
+ * Inflow Weight Globals
+ */
+FlowHx711Module weightFlowSensor(flowHx711DoutPin, flowHx711SckPin);
+
+/**
  * Flow Sensor Globals
  */
+
 FlowFs2012Module flowSensor(&I2C);
 float lastFlow = 0.0;
 
@@ -201,7 +212,6 @@ QuickPID tempPID(
     0, // Kd
     0, // POn - Proportional on Error weighting. O = 100% Proportional on Measurement, 1 = 100% Proportional on Error
     QuickPID::DIRECT);
-
 
 class RotartEncodeCallbacks : public RotaryEncoderModuleCallbacks
 {
@@ -364,8 +374,9 @@ void setup()
 
   // flow sensor support 100k and 400k freq
   I2C.begin(i2cSda, i2cScl, 100000);
-  
+
   flowSensor.begin();
+  weightFlowSensor.begin();
 
   pump.setCallbacks(new PumpCallbacks());
   pump.begin();
@@ -480,8 +491,9 @@ void loop()
 {
 
   float flow = flowSensor.getFlowRateMlPerMin();
-  Serial.println("flow: " + String(flow));
-  if(flow != lastFlow) {
+  //Serial.println("flow: " + String(flow));
+  if (flow != lastFlow)
+  {
     pFlowSensorBLEChar->setValue(flow);
   }
 
@@ -619,6 +631,12 @@ void loop()
   //     " c: " + String(temperature));
 
   // Serial.println("flow" + String(flowSensor.getRawFlowRate());
+
+  long weight = weightFlowSensor.getWeight();
+  if (weight != -1)
+  {
+    Serial.println("wflow: " + String(weight));
+  }
 
   pTemperatureSensorBLEChar->setValue(temperature);
 
