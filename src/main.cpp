@@ -57,7 +57,7 @@ const unsigned char encoderPin1 = 25;      // clk
 const unsigned char encoderPin2 = 26;      // dt
 const unsigned char encoderSwitchPin = 27; // push button switch (sw)
 const unsigned char pumpZeroCrossPin = 18; // zc
-const unsigned char pumpControlPin =  19;  // pwm
+const unsigned char pumpControlPin = 19;   // pwm
 // ADC Channel 1 must be used when Esp32 WiFi or BT is active
 // NOTE: Pins 34 to 39 are input only
 const unsigned char pressureSensorPin = 33;    // pressure sensor analog output -> adc
@@ -72,8 +72,8 @@ const unsigned char boilerTempControlPin = 17; // GPIO to SSR
 // https://learn.sparkfun.com/tutorials/bi-directional-logic-level-converter-hookup-guide
 // https://www.arduino.cc/en/reference/wire
 
-const unsigned char i2cSda = 23;  // i2c data line
-const unsigned char i2cScl = 22;  // i2c clock line
+const unsigned char i2cSda = 23; // i2c data line
+const unsigned char i2cScl = 22; // i2c clock line
 
 /**
  * I2C Globals
@@ -180,6 +180,7 @@ QuickPID pressurePID(
     highPressureI,   // Ki
     highPressureD,   // Kd
     highPressurePon, // POn - Proportional on Error weighting. O = 100% Proportional on Measurement, 1 = 100% Proportional on Error
+    0,               // DOn
     QuickPID::DIRECT);
 
 /**
@@ -200,8 +201,8 @@ QuickPID tempPID(
     1, // Ki
     0, // Kd
     0, // POn - Proportional on Error weighting. O = 100% Proportional on Measurement, 1 = 100% Proportional on Error
+    0, // DOn,
     QuickPID::DIRECT);
-
 
 class RotartEncodeCallbacks : public RotaryEncoderModuleCallbacks
 {
@@ -364,7 +365,7 @@ void setup()
 
   // flow sensor support 100k and 400k freq
   I2C.begin(i2cSda, i2cScl, 100000);
-  
+
   flowSensor.begin();
 
   pump.setCallbacks(new PumpCallbacks());
@@ -440,7 +441,6 @@ void setup()
           BLECharacteristic::PROPERTY_NOTIFY);
   Serial.println("BLE Temperature Sensor Characteristic Created");
   pFlowSensorBLEChar->addDescriptor(new BLE2902());
-  // pFlowSensorBLEChar->setValue(0);
 
   pService->start();
 
@@ -470,6 +470,8 @@ void setup()
   pressurePID.SetOutputLimits(pump.getPumpMin() * 100, pump.getPumpMax() * 100);
   pressurePID.SetMode(pump.getPowerIsOn() ? QuickPID::AUTOMATIC : QuickPID::MANUAL);
 
+  //pFlowSensorBLEChar->setValue(0);
+
   xTaskCreate(bleNotifyTask, "bleNotify", 5000, NULL, 1, NULL);
 }
 
@@ -481,8 +483,10 @@ void loop()
 
   float flow = flowSensor.getFlowRateMlPerMin();
   Serial.println("flow: " + String(flow));
-  if(flow != lastFlow) {
+  if (flow != lastFlow)
+  {
     pFlowSensorBLEChar->setValue(flow);
+    lastFlow = flow;
   }
 
   // Handle Encoder
@@ -571,7 +575,7 @@ void loop()
     else if (barPressure < 5)
     {
       pressurePID.SetMode(QuickPID::AUTOMATIC);
-      pressurePID.SetTunings(lowPressureP, lowPressureI, lowPressureD, lowPressurePon);
+      pressurePID.SetTunings(lowPressureP, lowPressureI, lowPressureD, lowPressurePon, 0);
       pressurePidInput = (int)(barPressure * 100.0);
 
       tempPID.SetMode(QuickPID::AUTOMATIC);
@@ -581,7 +585,7 @@ void loop()
       // when pressure is above set point, let the PID act on pressure alone
       //Serial.println("Sp: " + String(pressurePidSetpoint) + " O: " + String(pressurePidOutput) + " I: " + String(pressurePidInput) + " B: " + String(rawPressurePerc));
       pressurePID.SetMode(QuickPID::AUTOMATIC);
-      pressurePID.SetTunings(highPressureP, highPressureI, highPressureD, highPressurePon);
+      pressurePID.SetTunings(highPressureP, highPressureI, highPressureD, highPressurePon, 0);
       pressurePidInput = (int)(barPressure * 100.0);
 
       // Force the heater to 100% duty cycle when pump is running at high pressure

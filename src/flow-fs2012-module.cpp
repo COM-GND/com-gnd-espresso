@@ -58,8 +58,6 @@ void FlowFs2012Module::watchFlowTask(void *instance)
 
             highwater = uxTaskGetStackHighWaterMark(NULL);
 
-            Serial.println("flow " + String(sensorValue) + ": " + String(myMSB) + " " + String(myLSB));
-
             vTaskDelay(80 / portTICK_PERIOD_MS);
         };
     }
@@ -130,8 +128,13 @@ int FlowFs2012Module::readSensor(void)
 
 float FlowFs2012Module::getFlowRateMlPerMin(void)
 {
-    float mlPerMin = (float)rawFlowRate / 10.0;
-    return mlPerMin;
+    if (rawFlowRate > 0)
+    {
+        float mlPerMin = (float)rawFlowRate / 10.0;
+        return mlPerMin;
+    }
+
+    return 0.0;
 }
 
 TwoWire *FlowFs2012Module::getI2cInstance(void)
@@ -142,7 +145,12 @@ TwoWire *FlowFs2012Module::getI2cInstance(void)
 void FlowFs2012Module::_setRawFlowRate(int newRawFlowRate)
 {
     Serial.println("_setRawFlowRate: " + String(newRawFlowRate));
-    rawFlowRate = newRawFlowRate;
+
+    // sensor can sometimes return invalid value (e.g 0xFFFF)
+    if(newRawFlowRate <= 5000) {
+        rawFlowRate = newRawFlowRate;
+    }
+   
 }
 
 int FlowFs2012Module::getRawFlowRate(void)
