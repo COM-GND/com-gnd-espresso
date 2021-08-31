@@ -157,19 +157,19 @@ float pressurePidSetpoint = 0;
 float pressurePidInput = 0;
 float pressurePidOutput = 0;
 // Proportional Gain - Dependant on pOn value. A mix of proportional response to measurement vs error
-// PoM: higher value increases conservativeness
-float lowPressureP = 4.0;
-float highPressureP = 5.0; // testing: 1.5;
-                           // Integral Gain
-float lowPressureI = 1;
-float highPressureI = 12.0;
-// Derivitative Gain
-float lowPressureD = 1;
-float highPressureD = 1;
+// PoM: higher value increases conservativeness. As pressure increases, P decreases.
+float lowPressureP = 1.75;
+float highPressureP = 4.0; // testing: 1.5;
+// Integral Gain
+float lowPressureI = 3;
+float highPressureI = 10.0;
+// Derivative Gain
+float lowPressureD = .5;
+float highPressureD = 3;
 // Ratio of Proportional on Measurement vs Proportional on Error
 // 0 = 100% PoM, 1 = 100% PoE
 // see: http://brettbeauregard.com/blog/2017/06/introducing-proportional-on-measurement/
-float lowPressurePon = 0.2;
+float lowPressurePon = 0.4;
 float highPressurePon = 0.1; // testing: .25
 
 QuickPID pressurePID(
@@ -197,11 +197,11 @@ QuickPID tempPID(
     &tempPidInput,
     &tempPidOutput,
     &tempPidSetpoint,
-    5, // Kp
-    1, // Ki
-    0, // Kd
-    0, // POn - Proportional on Error weighting. O = 100% Proportional on Measurement, 1 = 100% Proportional on Error
-    0, // DOn,
+    5,   // Kp
+    1.5, // Ki
+    0,   // Kd
+    0,   // POn - Proportional on Error weighting. O = 100% Proportional on Measurement, 1 = 100% Proportional on Error
+    0,   // DOn,
     QuickPID::DIRECT);
 
 class RotartEncodeCallbacks : public RotaryEncoderModuleCallbacks
@@ -572,7 +572,7 @@ void loop()
 
       tempPID.SetMode(QuickPID::AUTOMATIC);
     }
-    else if (barPressure < 5)
+    else if (barPressure < 4)
     {
       pressurePID.SetMode(QuickPID::AUTOMATIC);
       pressurePID.SetTunings(lowPressureP, lowPressureI, lowPressureD, lowPressurePon, 0);
