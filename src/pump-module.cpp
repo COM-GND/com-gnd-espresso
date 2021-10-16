@@ -12,7 +12,7 @@ int gPowerOn = false;
 PumpModule::PumpModule(int zcPin, int cntrlPin) : pump(cntrlPin)
 {
   xHandle = NULL;
-  pumpMin = 120;
+  pumpMin = 110;
   pumpMax = 254;
   pumpRange = pumpMax - pumpMin;
   pumpLevel = pumpMax;
@@ -96,13 +96,12 @@ void PumpModule::begin()
   Serial.println("PumpModule Begin");
 
   xTaskCreate(
-    &PumpModule::watchPumpPowerTask,
-    "pumpMon",
-    15000,
-    this,
-    10, 
-    &xHandle
-  );
+      &PumpModule::watchPumpPowerTask,
+      "pumpMon",
+      15000,
+      this,
+      10,
+      &xHandle);
 
   DimmableLightLinearized::begin();
 }

@@ -1,7 +1,7 @@
-
+#include <RunningAverage.h>
 #include "temperature-ntc-module.h"
 
-TemperatureNtcModule::TemperatureNtcModule(unsigned char sensorPin)
+TemperatureNtcModule::TemperatureNtcModule(unsigned char sensorPin) : runAvg(16)
 {
     adc.attach(sensorPin);
 }
@@ -23,7 +23,7 @@ void TemperatureNtcModule::watchTemperatureTask(void *instance)
 
     TemperatureNtcModule *myself = (TemperatureNtcModule *)instance;
 
-    int sampleCount = 5;
+    int sampleCount = 100;
 
     for (;;)
     {
@@ -31,7 +31,7 @@ void TemperatureNtcModule::watchTemperatureTask(void *instance)
         for (int i = 0; i < sampleCount; i++)
         {
             newTemperature += myself->adc.readMiliVolts();
-            vTaskDelay(1 / portTICK_PERIOD_MS);
+            vTaskDelay(5 / portTICK_PERIOD_MS);
         }
         newTemperature /= (float)sampleCount;
 
@@ -52,22 +52,24 @@ void TemperatureNtcModule::begin()
 
     xTaskCreate(
         &TemperatureNtcModule::watchTemperatureTask, // Function that should be called
-        "read temperature multisample",            // Name of the task (for debugging)
-        8000,                                  // Stack size (bytes)
-        this,                                   // Parameter to pass
-        3,                                      // Task priority
-        &xHandle                                // Task handle
+        "read temperature multisample",              // Name of the task (for debugging)
+        8000,                                        // Stack size (bytes)
+        this,                                        // Parameter to pass
+        3,                                           // Task priority
+        &xHandle                                     // Task handle
     );
 }
 
 void TemperatureNtcModule::_setTemperatureMv(int temperatureMv)
 {
     rawTemperature = temperatureMv;
+    runAvg.addValue(rawTemperature);
 }
 
 int TemperatureNtcModule::getTemperatureMv(void)
 {
-    return rawTemperature;
+    // return rawTemperature;
+    return runAvg.getAverage();
 }
 
 float TemperatureNtcModule::getTemperatureResistance(void)
@@ -75,7 +77,6 @@ float TemperatureNtcModule::getTemperatureResistance(void)
     float ohms = (10000.0 * rawTemperature) / (3300.0 - rawTemperature);
     return ohms;
 }
-
 
 float TemperatureNtcModule::getTemperatureC()
 {

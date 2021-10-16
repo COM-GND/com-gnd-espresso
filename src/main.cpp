@@ -111,8 +111,8 @@ float barPressure = 0;
 
 PumpModule pump(pumpZeroCrossPin, pumpControlPin);
 
-int pumpLevel = 0;
-int lastPumpLevel = 0;
+float pumpLevel = 0.0;
+float lastPumpLevel = 0.0;
 bool pumpPowerIsOn = false;
 // The minimum value below which the pump cuts-out
 // const int pumpMin = 100;
@@ -158,29 +158,29 @@ float pressurePidInput = 0;
 float pressurePidOutput = 0;
 // Proportional Gain - Dependant on pOn value. A mix of proportional response to measurement vs error
 // PoM: higher value increases conservativeness. As pressure increases, P decreases.
-float lowPressureP = 1.75;
-float highPressureP = 4.0; // testing: 1.5;
-// Integral Gain
-float lowPressureI = 3;
-float highPressureI = 10.0;
-// Derivative Gain
-float lowPressureD = .5;
-float highPressureD = 3;
+float lowPressureP = .1;
+float highPressureP = .2;
+// Integral Gain (per sample period)
+float lowPressureI = .75;
+float highPressureI = 1.75;
+// Derivative Gain (per second)
+float lowPressureD = 0;
+float highPressureD = 0;
 // Ratio of Proportional on Measurement vs Proportional on Error
 // 0 = 100% PoM, 1 = 100% PoE
 // see: http://brettbeauregard.com/blog/2017/06/introducing-proportional-on-measurement/
-float lowPressurePon = 0.4;
-float highPressurePon = 0.1; // testing: .25
+float lowPressurePon = 1.0;
+float highPressurePon = 1.0;
 
 QuickPID pressurePID(
     &pressurePidInput,
     &pressurePidOutput,
     &pressurePidSetpoint,
-    highPressureP,   // Kp
-    highPressureI,   // Ki
-    highPressureD,   // Kd
-    highPressurePon, // POn - Proportional on Error weighting. O = 100% Proportional on Measurement, 1 = 100% Proportional on Error
-    0,               // DOn
+    lowPressureP,   // Kp
+    lowPressureI,   // Ki
+    lowPressureD,   // Kd
+    lowPressurePon, // POn - Proportional on Error weighting. O = 100% Proportional on Measurement, 1 = 100% Proportional on Error
+    0,              // DOn
     QuickPID::DIRECT);
 
 /**
@@ -189,7 +189,7 @@ QuickPID pressurePID(
 
 SsrHeaterModule ssrHeater(boilerTempControlPin, HEATER_SSR_PERIOD_MS);
 
-float tempPidSetpoint = 93.0; /* celcius */
+float tempPidSetpoint = 93.0; /* celsius */
 float tempPidInput = 0;
 float tempPidOutput = 0;
 
@@ -197,11 +197,11 @@ QuickPID tempPID(
     &tempPidInput,
     &tempPidOutput,
     &tempPidSetpoint,
-    5,   // Kp
-    1.5, // Ki
-    0,   // Kd
-    0,   // POn - Proportional on Error weighting. O = 100% Proportional on Measurement, 1 = 100% Proportional on Error
-    0,   // DOn,
+    1.3,   // Kp
+    0.025, // Ki
+    0.25,  // Kd
+    0.5,   // POn - Proportional on Error weighting. O = 100% Proportional on Measurement, 1 = 100% Proportional on Error
+    0,     // DOn,
     QuickPID::DIRECT);
 
 class RotartEncodeCallbacks : public RotaryEncoderModuleCallbacks
@@ -387,6 +387,7 @@ void setup()
   Serial.println("Boiler Heater SSR Module Configured");
 
   tempPID.SetOutputLimits(0.0, 100.0);
+  tempPID.SetSampleTimeUs(1000000); // 1 second
   tempPID.SetMode(QuickPID::AUTOMATIC);
 
   BLEDevice::init("COM-GND Espresso");
@@ -466,8 +467,9 @@ void setup()
   rotaryEncoder.begin();
 
   // Pressure PID
-  pressurePidSetpoint = 10 * 100; // bars
-  pressurePID.SetOutputLimits(pump.getPumpMin() * 100, pump.getPumpMax() * 100);
+  pressurePidSetpoint = 90.0;        // bars * 10
+  pressurePID.SetSampleTimeUs(1000); // 1 ms
+  pressurePID.SetOutputLimits(0.0, 100.0);
   pressurePID.SetMode(pump.getPowerIsOn() ? QuickPID::AUTOMATIC : QuickPID::MANUAL);
 
   //pFlowSensorBLEChar->setValue(0);
@@ -482,7 +484,7 @@ void loop()
 {
 
   float flow = flowSensor.getFlowRateMlPerMin();
-  Serial.println("flow: " + String(flow));
+  // Serial.println("flow: " + String(flow));
   if (flow != lastFlow)
   {
     pFlowSensorBLEChar->setValue(flow);
@@ -496,9 +498,8 @@ void loop()
     lastEncoderPosition = encoderPosition;
     Serial.println("encoder: " + String(encoderPosition));
     float scaledTargetPressure = encoderPosition * 10.0;
-    pressurePidSetpoint = (int)(scaledTargetPressure * 100.0);
+    pressurePidSetpoint = (float)(encoderPosition * 100.0);
     pPressureTargetBLEChar->setValue(scaledTargetPressure);
-    // pPressureTargetBLEChar->notify();
     blePressureTargetNotifyFlag = true;
   }
 
@@ -506,116 +507,110 @@ void loop()
   if (lastBlePressureTarget != blePressureTarget)
   {
     lastBlePressureTarget = blePressureTarget;
-    pressurePidSetpoint = (int)(lastBlePressureTarget * 100);
+    pressurePidSetpoint = (float)(lastBlePressureTarget * 10.0);
     rotaryEncoder.setPercent(lastBlePressureTarget / 10.0);
     pPressureTargetBLEChar->setValue(lastBlePressureTarget);
-    // pPressureTargetBLEChar->notify();
     blePressureTargetNotifyFlag = true;
   }
-  // Handle Pressure Sensor
-
-  // int rawPressure = analogRead(pressureSensorPin);
-  // int rawPressure = readPressureMultisample();
-  // int normalizeRawPressure = rawPressure - minRawPressure;
-  // float rawPressurePerc = (float)((float)normalizeRawPressure / (float)rawPressureRange);
 
   lastBarPressure = barPressure;
-
-  // Calculate the bar pressure, rounding two 3 decimals
-  // TODO: this seems to result in a float like 12.1200000012345
-  // barPressure = roundf(rawPressurePerc * 10.0 * 1000.0) / 1000.0;
   barPressure = pressureSensor.getPressureBars();
 
   if (lastBarPressure != barPressure)
   {
+    pressurePidInput = barPressure * 10.0;
+
     if (deviceConnected)
     {
       pPressureSensorBLEChar->setValue(barPressure);
-      // pPressureSensorBLEChar->notify();
       blePressureSensorNotifyFlag = true;
     }
     // Pressure is not a useful input value when there is no resistance to the pump.
     // e.g. when the portafilter is empty, the pressure will be approaching 0, as flow approaches pump maximum.
     // ideally the system would model flow rate rather than pressure to solve this.
-    // For now, when the system pressure is below a set point, we *very* roughly estimate the flow rate
-    // The pump has specifications for flow at a given pressure, but not for a variable power supply
-    // TODO: characterize pump flow at various power levels - this can be done once a scale
-    // is integrated to measure water output accross different power levels.
-
-    const float transitionPressure = .25; // 1/4 bar
-    if (barPressure < transitionPressure)
+    // Intead, we switch off the PID when there is no pressurization.
+    if (barPressure < .25)
     {
-      /**
-       * Note that the PID is in P_ON_M mode
-       * see: http://brettbeauregard.com/blog/2017/06/introducing-proportional-on-measurement/
-       * (p is a resistive force)
-       * TODO: only setTuning on initial transition below .2
-       */
-      // float pressurePerc = pressureSensor.getPressurePercent();
-
-      // pressurePID.SetTunings(3, 8, .55, 0);
-
-      // // flow will be estimated as the inverse of pressure * the pump power %
-      // float pumpPerc = pump.getPowerIsOn() ? pump.getPumpPercent() : 0;
-
-      // float estFlow = (1 - pressurePerc) * pumpPerc;
-      // // create a differential to increase weight of flow vs pressure on PID pressurePidInput, as pressure drops
-      // float delta = transitionPressure - pressurePerc;
-      // float nomalizedDelta = 1 / transitionPressure * delta; // scale delta to 0 - 1;
-      // float blendedInput = (nomalizedDelta * estFlow) + ((1 - nomalizedDelta) * pressurePerc);
-      // //Serial.println("out: " + String(pressurePidOutput) + " bar: " + String(barPressure) + " flow: " + estFlow + " pump: " + String(pumpPerc) + " delta: " + String(nomalizedDelta) + " input: " + blendedInput);
-
-      // pressurePidInput = (int)(blendedInput * 10.0 * 100.0);
-
       pressurePID.SetMode(QuickPID::MANUAL);
-      pressurePidInput = (int)(barPressure * 100.0);
-
-      tempPID.SetMode(QuickPID::AUTOMATIC);
+      //tempPID.SetMode(QuickPID::AUTOMATIC);
     }
     else if (barPressure < 4)
     {
-      pressurePID.SetMode(QuickPID::AUTOMATIC);
+      // use low pressure PID vals
       pressurePID.SetTunings(lowPressureP, lowPressureI, lowPressureD, lowPressurePon, 0);
-      pressurePidInput = (int)(barPressure * 100.0);
-
-      tempPID.SetMode(QuickPID::AUTOMATIC);
+      pressurePID.SetMode(QuickPID::AUTOMATIC);
+      //tempPID.SetMode(QuickPID::AUTOMATIC);
     }
     else
     {
-      // when pressure is above set point, let the PID act on pressure alone
-      //Serial.println("Sp: " + String(pressurePidSetpoint) + " O: " + String(pressurePidOutput) + " I: " + String(pressurePidInput) + " B: " + String(rawPressurePerc));
-      pressurePID.SetMode(QuickPID::AUTOMATIC);
+      // use high pressure PID vals
       pressurePID.SetTunings(highPressureP, highPressureI, highPressureD, highPressurePon, 0);
-      pressurePidInput = (int)(barPressure * 100.0);
+      pressurePID.SetMode(QuickPID::AUTOMATIC);
 
-      // Force the heater to 100% duty cycle when pump is running at high pressure
+      // Force the heater to 100% duty cycle when pump is running at high rate
       // We do this to reduce electrical noise when their is a high power draw within
       // It will smooth out the pressure and head-off water temperature drops during
-      // high flow rates
-      tempPID.SetMode(QuickPID::MANUAL);
-      tempPidOutput = 100.0;
+      // high flow rates.
+      // However, for safety, do not exceed the temperature Setpoint
+      // if (tempPidInput < (tempPidSetpoint) + 1.0 && pumpLevel > .75)
+      // {
+      //   tempPID.SetMode(QuickPID::MANUAL);
+      //   tempPidOutput = 100.0;
+      // }
     }
   }
 
+  // handle heater temperature
+
   float temperature = externalBoilerTempSensor.getTemperatureC();
-  int tempMv = externalBoilerTempSensor.getTemperatureMv();
-  float tempR = externalBoilerTempSensor.getTemperatureResistance();
+
+  if (temperature > 50)
+  {
+    // Force the heater to 100% duty cycle when pump is running at high rate
+    // We do this to reduce electrical noise when their is a high power draw.
+    // This smooths out the pressure and heads-off water temperature drops during
+    // high flow rates. For safety, do not want to exceed the temperature Setpoint
+    if (tempPidInput < (tempPidSetpoint) + 1.0 && pumpLevel > .75 && barPressure >= 4)
+    {
+      tempPID.SetMode(QuickPID::MANUAL);
+      tempPidOutput = 100.0;
+    }
+    else
+    {
+      tempPID.SetMode(QuickPID::AUTOMATIC);
+    }
+  }
+  else
+  {
+    // if the temp is below 50c, the heater power is either off and we don't want to run the pid calc,
+    // or it is on but just warming up. In either case, we want to drive the heater at 100%.
+    Serial.println(
+        "tSp: " + String(tempPidSetpoint) +
+        " tOut: " + String(tempPidOutput) +
+        " tIn: " + String(tempPidInput) +
+        " C " + String(temperature));
+    tempPID.SetMode(QuickPID::MANUAL);
+    tempPidOutput = 100.0;
+  }
 
   tempPidInput = temperature;
   ssrHeater.setDutyCyclePercent((float)(tempPidOutput / 100.0));
+
+  // int tempMv = externalBoilerTempSensor.getTemperatureMv();
+  // float tempR = externalBoilerTempSensor.getTemperatureResistance();
+
   // Serial.println(
   //     "tSp: " + String(tempPidSetpoint) +
   //     " tOut: " + String(tempPidOutput) +
   //     " tIn: " + String(tempPidInput) +
   //     " C " + String(temperature));
   // Serial.println(
-  //   "pSp: " + String(pressurePidSetpoint) +
-  //   " pOut: " + String(pressurePidOutput) +
-  //   " pIn: " + String(pressurePidInput) +
-  //   " pressure: " + String(barPressure) +
-  //   " Pump: " + String(pumpLevel) +
-  //   " C: " + String(temperature)
-  // );
+  //     "pSp: " + String(pressurePidSetpoint) +
+  //     " pOut: " + String(pressurePidOutput) +
+  //     " pIn: " + String(pressurePidInput) +
+  //     " pressure: " + String(barPressure) +
+  //     " Pump: " + String(pumpLevel) +
+  //     " C: " + String(temperature));
 
   // Serial.println(
   //     "mv: " + String(tempMv) +
@@ -636,15 +631,14 @@ void loop()
   else
   {
     // use encoder position when pid is off.
-
-    pumpLevel = (int)(encoderPosition * (float)pump.getPumpRange()) + pump.getPumpMin();
+    pumpLevel = encoderPosition;
     if (pumpPowerIsOn)
     {
-      pressurePidOutput = (int)(pumpLevel * 100.0);
+      pressurePidOutput = pumpLevel * 100.0;
     }
     else
     {
-      pressurePidOutput = pump.getPumpMin() * 100.0;
+      pressurePidOutput = 0;
     }
   }
 
@@ -656,9 +650,9 @@ void loop()
 
   if (lastPumpLevel != pumpLevel)
   {
-    // Serial.println(pumpLevel);
+    Serial.println(pumpLevel);
     lastPumpLevel = pumpLevel;
-    pump.setPumpLevel(pumpLevel);
+    pump.setPumpPercent(pumpLevel);
     if (pumpPowerIsOn)
     {
       float pumpPerc = pump.getPumpPercent();
