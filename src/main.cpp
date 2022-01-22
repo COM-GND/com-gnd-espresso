@@ -38,7 +38,8 @@
 #define PRESSURE_SENSOR_CHAR_ID "c14f18ef-4797-439e-a54f-498ba680291d" // BT read-only characteristic for pressure sensor value in bars
 #define PRESSURE_TARGET_CHAR_ID "34c242f1-8b5f-4d99-8238-4538eb0b5764" // BT read/write characteristic for target pressure in bars
 #define PUMP_POWER_CHAR_ID "d8ad3645-50ad-4f7a-a79d-af0a59469455"      // BT read-only characteristic for pumps power level
-#define TEMP_SENSOR_CHAR_ID 0x2A1C                                     // BT read-only characteristic for boiler external temperature
+#define TEMP_SENSOR_CHAR_ID 0x2A1C                                     // BT read-only characteristic for boiler external temperature - "Temperature Measurement" standard id
+#define TEMP_TARGET_CHAR_ID "14da7f12-2faa-47c2-89af-1752098c281b"     // BT read/write characteristic for target boiler temperature
 #define FLOW_SENSOR_CHAR_ID "f5ec47c3-b240-49e8-a7c8-1b5fe5537cde"     // BT read-only characteristic for in-flow rate
 #define BARS_UNIT_ID "2780"
 
@@ -139,6 +140,7 @@ BLECharacteristic *pPressureSensorBLEChar = NULL;
 BLECharacteristic *pPressureTargetBLEChar = NULL;
 BLECharacteristic *pPumpPowerBLEChar = NULL;
 BLECharacteristic *pTemperatureSensorBLEChar = NULL;
+BLECharacteristic *pTemperatureTargetBLEChar = NULL;
 BLECharacteristic *pFlowSensorBLEChar = NULL;
 
 float blePressureTarget = 0;
@@ -146,6 +148,11 @@ float lastBlePressureTarget = 0;
 bool blePressureSensorNotifyFlag = false;
 bool blePressureTargetNotifyFlag = false;
 bool blePumpPowerNotifyFlag = false;
+
+float bleTemperatureTarget = 93.0;
+float lastBleTemperatureTarget = bleTemperatureTarget;
+bool bleTemperatureTargetNotifyFlag = false;
+
 /**
  * Pressure PID Globals
  * https://playground.arduino.cc/Code/PIDLibrary/
@@ -159,10 +166,10 @@ float pressurePidOutput = 0;
 // Proportional Gain - Dependant on pOn value. A mix of proportional response to measurement vs error
 // PoM: higher value increases conservativeness. As pressure increases, P decreases.
 float lowPressureP = .1;
-float highPressureP = .2;
+float highPressureP = .25;
 // Integral Gain (per sample period)
-float lowPressureI = .75;
-float highPressureI = 1.75;
+float lowPressureI = 1.0;
+float highPressureI = 10.0;
 // Derivative Gain (per second)
 float lowPressureD = 0;
 float highPressureD = 0;
@@ -189,7 +196,7 @@ QuickPID pressurePID(
 
 SsrHeaterModule ssrHeater(boilerTempControlPin, HEATER_SSR_PERIOD_MS);
 
-float tempPidSetpoint = 93.0; /* celsius */
+float tempPidSetpoint = bleTemperatureTarget; /* celsius */
 float tempPidInput = 0;
 float tempPidOutput = 0;
 
@@ -197,7 +204,7 @@ QuickPID tempPID(
     &tempPidInput,
     &tempPidOutput,
     &tempPidSetpoint,
-    1.3,   // Kp
+    1.6,   // Kp
     0.025, // Ki
     0.25,  // Kd
     0.5,   // POn - Proportional on Error weighting. O = 100% Proportional on Measurement, 1 = 100% Proportional on Error
@@ -295,7 +302,7 @@ class PressureTargetBLECharCallbacks : public BLECharacteristicCallbacks
 
     if (value.length() > 0)
     {
-      Serial.print("Recieved BT Target Pressure (" + String(value.length()) + "): ");
+      Serial.print("Received BT Target Pressure (" + String(value.length()) + "): ");
 
       for (int i = 0; i < value.length(); i++)
       {
@@ -311,6 +318,37 @@ class PressureTargetBLECharCallbacks : public BLECharacteristicCallbacks
     // Serial.println("float: " + String(fValue));
 
     blePressureTarget = fValue;
+
+    // pCharacteristic->setValue("received " + value);
+  }
+};
+
+class TemperatureTargetBLECharCallbacks : public BLECharacteristicCallbacks
+{
+  void onWrite(BLECharacteristic *pCharacteristic)
+  {
+    std::string value = pCharacteristic->getValue();
+
+    String strValue;
+
+    if (value.length() > 0)
+    {
+      Serial.print("Received BT Target Temperature (" + String(value.length()) + "): ");
+
+      for (int i = 0; i < value.length(); i++)
+      {
+        Serial.print(value[i]);
+        strValue += (char)value[i];
+      }
+      Serial.println("---");
+      Serial.println(strValue);
+    }
+
+    // convert the string to a float value
+    float fValue = strtof(strValue.c_str(), NULL);
+    // Serial.println("float: " + String(fValue));
+
+    bleTemperatureTarget = fValue;
 
     // pCharacteristic->setValue("received " + value);
   }
@@ -334,6 +372,11 @@ void bleNotifyTask(void *params)
     {
       pPumpPowerBLEChar->notify();
       blePumpPowerNotifyFlag = false;
+    }
+    if (bleTemperatureTargetNotifyFlag)
+    {
+      pPressureTargetBLEChar->notify();
+      blePressureTargetNotifyFlag = false;
     }
     vTaskDelay(100 / portTICK_PERIOD_MS);
   }
@@ -422,6 +465,9 @@ void setup()
   Serial.println("BLE Pressure Target Characteristic Callback Initialized");
   pPressureTargetBLEChar->addDescriptor(new BLE2902());
 
+  /**
+   * Pump Power
+   */
   pPumpPowerBLEChar = pService->createCharacteristic(
       PUMP_POWER_CHAR_ID,
       BLECharacteristic::PROPERTY_READ |
@@ -435,6 +481,20 @@ void setup()
           BLECharacteristic::PROPERTY_NOTIFY);
   Serial.println("BLE Temperature Sensor Characteristic Created");
   pTemperatureSensorBLEChar->addDescriptor(new BLE2902());
+
+  /**
+   * Target Temperature
+   */
+  pTemperatureTargetBLEChar = pService->createCharacteristic(
+      TEMP_TARGET_CHAR_ID,
+      BLECharacteristic::PROPERTY_READ |
+          BLECharacteristic::PROPERTY_WRITE |
+          BLECharacteristic::PROPERTY_NOTIFY |
+          BLECharacteristic::PROPERTY_INDICATE);
+  Serial.println("BLE Temperature Target Characteristic Created");
+  pPressureTargetBLEChar->setCallbacks(new TemperatureTargetBLECharCallbacks());
+  Serial.println("BLE Temperature Target Characteristic Callback Initialized");
+  pPressureTargetBLEChar->addDescriptor(new BLE2902());
 
   pFlowSensorBLEChar = pService->createCharacteristic(
       FLOW_SENSOR_CHAR_ID,
@@ -484,7 +544,9 @@ void loop()
 {
 
   float flow = flowSensor.getFlowRateMlPerMin();
-  // Serial.println("flow: " + String(flow));
+  int rawFlow = flowSensor.getRawFlowRate();
+
+  Serial.println("rawFlow: " + String(rawFlow));
   if (flow != lastFlow)
   {
     pFlowSensorBLEChar->setValue(flow);
@@ -560,10 +622,21 @@ void loop()
     }
   }
 
-  // handle heater temperature
+  /**
+   * Handle BLE Target Temperature change
+   */
+  if (lastBleTemperatureTarget != bleTemperatureTarget)
+  {
+    lastBleTemperatureTarget = bleTemperatureTarget;
+    tempPidSetpoint = bleTemperatureTarget;
+    pTemperatureTargetBLEChar->setValue(bleTemperatureTarget);
+    bleTemperatureTargetNotifyFlag = true;
+  }
 
+  /**
+   * Hanlde Boilder Temp control
+   */
   float temperature = externalBoilerTempSensor.getTemperatureC();
-
   if (temperature > 50)
   {
     // Force the heater to 100% duty cycle when pump is running at high rate
@@ -574,6 +647,13 @@ void loop()
     {
       tempPID.SetMode(QuickPID::MANUAL);
       tempPidOutput = 100.0;
+    }
+    else if (tempPidInput > tempPidSetpoint + .5)
+    {
+      // we want to reset the PID outputSum to remove an accumulated integral quickly
+      // (setting PID to Manual resets the integral and PoM)
+      tempPID.SetMode(QuickPID::MANUAL);
+      tempPidOutput = 0.0;
     }
     else
     {
