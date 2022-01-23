@@ -375,8 +375,8 @@ void bleNotifyTask(void *params)
     }
     if (bleTemperatureTargetNotifyFlag)
     {
-      pPressureTargetBLEChar->notify();
-      blePressureTargetNotifyFlag = false;
+      pTemperatureTargetBLEChar->notify();
+      bleTemperatureTargetNotifyFlag = false;
     }
     vTaskDelay(100 / portTICK_PERIOD_MS);
   }
@@ -492,9 +492,9 @@ void setup()
           BLECharacteristic::PROPERTY_NOTIFY |
           BLECharacteristic::PROPERTY_INDICATE);
   Serial.println("BLE Temperature Target Characteristic Created");
-  pPressureTargetBLEChar->setCallbacks(new TemperatureTargetBLECharCallbacks());
+  pTemperatureTargetBLEChar->setCallbacks(new TemperatureTargetBLECharCallbacks());
   Serial.println("BLE Temperature Target Characteristic Callback Initialized");
-  pPressureTargetBLEChar->addDescriptor(new BLE2902());
+  pTemperatureTargetBLEChar->addDescriptor(new BLE2902());
 
   pFlowSensorBLEChar = pService->createCharacteristic(
       FLOW_SENSOR_CHAR_ID,
@@ -546,7 +546,7 @@ void loop()
   float flow = flowSensor.getFlowRateMlPerMin();
   int rawFlow = flowSensor.getRawFlowRate();
 
-  Serial.println("rawFlow: " + String(rawFlow));
+  // Serial.println("rawFlow: " + String(rawFlow));
   if (flow != lastFlow)
   {
     pFlowSensorBLEChar->setValue(flow);

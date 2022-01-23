@@ -144,7 +144,7 @@ TwoWire *FlowFs2012Module::getI2cInstance(void)
 
 void FlowFs2012Module::_setRawFlowRate(int newRawFlowRate)
 {
-    Serial.println("_setRawFlowRate: " + String(newRawFlowRate));
+    //Serial.println("_setRawFlowRate: " + String(newRawFlowRate));
 
     // sensor can sometimes return invalid value (e.g 0xFFFF)
     if (newRawFlowRate <= 5000)
