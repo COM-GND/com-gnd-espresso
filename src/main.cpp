@@ -24,12 +24,12 @@
 #include "pressure-m323-module.h"
 #include "temperature-ntc-module.h"
 #include "ssr-heater-module.h"
-#include "flow-fs2012-module.h"
+#include "flow-plf2000-module.h"
 
 // https://btprodspecificationrefs.blob.core.windows.net/assigned-values/16-bit%20UUID%20Numbers%20Document.pdf
 /**
  * GATT Characteristic and Object Type 0x2A6D Pressure (spec says unit is pascals)
- * GATT Unit 0x2780 bar 
+ * GATT Unit 0x2780 bar
  * GATT Unit 0x272F Celsius temperature (degree Celsius)
  * GATT Characteristic and Object Type 0x2A1C Temperature Measurement
  * GATT Characteristic and Object Type 0x2A1D Temperature Type
@@ -38,9 +38,9 @@
 #define PRESSURE_SENSOR_CHAR_ID "c14f18ef-4797-439e-a54f-498ba680291d" // BT read-only characteristic for pressure sensor value in bars
 #define PRESSURE_TARGET_CHAR_ID "34c242f1-8b5f-4d99-8238-4538eb0b5764" // BT read/write characteristic for target pressure in bars
 #define PUMP_POWER_CHAR_ID "d8ad3645-50ad-4f7a-a79d-af0a59469455"      // BT read-only characteristic for pumps power level
+#define FLOW_SENSOR_CHAR_ID "f5ec47c3-b240-49e8-a7c8-1b5fe5537cde"     // BT read-only characteristic for in-flow rate
 #define TEMP_SENSOR_CHAR_ID 0x2A1C                                     // BT read-only characteristic for boiler external temperature - "Temperature Measurement" standard id
 #define TEMP_TARGET_CHAR_ID "14da7f12-2faa-47c2-89af-1752098c281b"     // BT read/write characteristic for target boiler temperature
-#define FLOW_SENSOR_CHAR_ID "f5ec47c3-b240-49e8-a7c8-1b5fe5537cde"     // BT read-only characteristic for in-flow rate
 #define BARS_UNIT_ID "2780"
 
 #define ENC_PRESSURE_MODE 0
@@ -49,8 +49,8 @@
 // The cycle time of the boiler Heater SSR
 #define HEATER_SSR_PERIOD_MS 1000
 
-/** 
- * Pins 
+/**
+ * Pins
  * set-up for ESP32 Devkit-c
  * see: https://circuits4you.com/2018/12/31/esp32-wroom32-devkit-analog-read-example/)
  */
@@ -73,8 +73,8 @@ const unsigned char boilerTempControlPin = 17; // GPIO to SSR
 // https://learn.sparkfun.com/tutorials/bi-directional-logic-level-converter-hookup-guide
 // https://www.arduino.cc/en/reference/wire
 
-const unsigned char i2cSda = 23; // i2c data line
-const unsigned char i2cScl = 22; // i2c clock line
+const unsigned char i2cSda = 23; // i2c data line -> plf2105 pin 4
+const unsigned char i2cScl = 22; // i2c clock line -> plf2015 pin 5
 
 /**
  * I2C Globals
@@ -84,12 +84,12 @@ TwoWire I2C = TwoWire(0);
 /**
  * Flow Sensor Globals
  */
-FlowFs2012Module flowSensor(&I2C);
+FlowPlf2000Module flowSensor(&I2C);
 float lastFlow = 0.0;
 
 /**
  * Pressure Sensor Globals
-*/
+ */
 PressureM323Module pressureSensor(pressureSensorPin, 60);
 
 /**
@@ -121,7 +121,7 @@ bool pumpPowerIsOn = false;
 // const int pumpMax = 254;
 // const int pumpRange = pumpMax - pumpMin;
 
-/** 
+/**
  * Encoder Globals
  */
 float encoderPosition = 0;
@@ -271,7 +271,7 @@ class ComGndServerCallbacks : public BLEServerCallbacks
     deviceConnected = false;
   }
 };
-//https://learn.sparkfun.com/tutorials/esp32-thing-plus-hookup-guide/arduino-example-esp32-ble
+// https://learn.sparkfun.com/tutorials/esp32-thing-plus-hookup-guide/arduino-example-esp32-ble
 class PressureSensorBLECharCallbacks : public BLECharacteristicCallbacks
 {
   void onRead(BLECharacteristic *pCharacteristic)
@@ -437,8 +437,16 @@ void setup()
   Serial.println("BLE Device Initialized");
   pServer = BLEDevice::createServer();
   Serial.println("BLE Server Initialized");
-  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  // Create the service with 30 Handles (default is 15).
+  // This is needed to have more than 7 characteristics.
+  // See: https://github.com/nkolban/esp32-snippets/issues/829
+  BLEService *pService = pServer->createService(
+      BLEUUID(SERVICE_UUID),
+      (uint32_t)30,
+      (uint8_t)0);
   Serial.println("BLE Service Initialized");
+
   pServer->setCallbacks(new ComGndServerCallbacks());
   Serial.println("BLE Server Callback Initialized");
 
@@ -475,6 +483,19 @@ void setup()
   Serial.println("BLE Pump Power Characteristic Created");
   pPumpPowerBLEChar->addDescriptor(new BLE2902());
 
+  /**
+   * Flow Sensor
+   */
+  pFlowSensorBLEChar = pService->createCharacteristic(
+      FLOW_SENSOR_CHAR_ID,
+      BLECharacteristic::PROPERTY_READ |
+          BLECharacteristic::PROPERTY_NOTIFY);
+  Serial.println("BLE Flow Sensor Characteristic Created");
+  pFlowSensorBLEChar->addDescriptor(new BLE2902());
+
+  /**
+   * Temperature Sensor
+   */
   pTemperatureSensorBLEChar = pService->createCharacteristic(
       (uint16_t)TEMP_SENSOR_CHAR_ID,
       BLECharacteristic::PROPERTY_READ |
@@ -495,13 +516,6 @@ void setup()
   pTemperatureTargetBLEChar->setCallbacks(new TemperatureTargetBLECharCallbacks());
   Serial.println("BLE Temperature Target Characteristic Callback Initialized");
   pTemperatureTargetBLEChar->addDescriptor(new BLE2902());
-
-  pFlowSensorBLEChar = pService->createCharacteristic(
-      FLOW_SENSOR_CHAR_ID,
-      BLECharacteristic::PROPERTY_READ |
-          BLECharacteristic::PROPERTY_NOTIFY);
-  Serial.println("BLE Temperature Sensor Characteristic Created");
-  pFlowSensorBLEChar->addDescriptor(new BLE2902());
 
   pService->start();
 
@@ -532,7 +546,7 @@ void setup()
   pressurePID.SetOutputLimits(0.0, 100.0);
   pressurePID.SetMode(pump.getPowerIsOn() ? QuickPID::AUTOMATIC : QuickPID::MANUAL);
 
-  //pFlowSensorBLEChar->setValue(0);
+  // pFlowSensorBLEChar->setValue(0);
 
   xTaskCreate(bleNotifyTask, "bleNotify", 5000, NULL, 1, NULL);
 }
@@ -546,9 +560,10 @@ void loop()
   float flow = flowSensor.getFlowRateMlPerMin();
   int rawFlow = flowSensor.getRawFlowRate();
 
-  // Serial.println("rawFlow: " + String(rawFlow));
   if (flow != lastFlow)
   {
+    Serial.println("rawFlow: " + String(rawFlow) + " flow: " + String(flow));
+
     pFlowSensorBLEChar->setValue(flow);
     lastFlow = flow;
   }
@@ -594,14 +609,14 @@ void loop()
     if (barPressure < .25)
     {
       pressurePID.SetMode(QuickPID::MANUAL);
-      //tempPID.SetMode(QuickPID::AUTOMATIC);
+      // tempPID.SetMode(QuickPID::AUTOMATIC);
     }
     else if (barPressure < 4)
     {
       // use low pressure PID vals
       pressurePID.SetTunings(lowPressureP, lowPressureI, lowPressureD, lowPressurePon, 0);
       pressurePID.SetMode(QuickPID::AUTOMATIC);
-      //tempPID.SetMode(QuickPID::AUTOMATIC);
+      // tempPID.SetMode(QuickPID::AUTOMATIC);
     }
     else
     {
@@ -634,7 +649,7 @@ void loop()
   }
 
   /**
-   * Hanlde Boilder Temp control
+   * Handle Boilder Temp control
    */
   float temperature = externalBoilerTempSensor.getTemperatureC();
   if (temperature > 50)
@@ -664,11 +679,11 @@ void loop()
   {
     // if the temp is below 50c, the heater power is either off and we don't want to run the pid calc,
     // or it is on but just warming up. In either case, we want to drive the heater at 100%.
-    Serial.println(
-        "tSp: " + String(tempPidSetpoint) +
-        " tOut: " + String(tempPidOutput) +
-        " tIn: " + String(tempPidInput) +
-        " C " + String(temperature));
+    // Serial.println(
+    //     "tSp: " + String(tempPidSetpoint) +
+    //     " tOut: " + String(tempPidOutput) +
+    //     " tIn: " + String(tempPidInput) +
+    //     " C " + String(temperature));
     tempPID.SetMode(QuickPID::MANUAL);
     tempPidOutput = 100.0;
   }
