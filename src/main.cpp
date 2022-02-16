@@ -406,7 +406,7 @@ void setup()
   Serial.println("Setup start");
   Serial.begin(115200);
 
-  // flow sensor support 100k and 400k freq
+  // fs21012 flow sensor support 100k and 400k freq
   I2C.begin(i2cSda, i2cScl, 100000);
 
   flowSensor.begin();
@@ -557,9 +557,12 @@ void setup()
 void loop()
 {
 
+  // uint16_t flowCount = flowSensor.readCalibrated();
+  // Serial.println("flowCount: " + String(flowCount));
+  // delay(6);
   float flow = flowSensor.getFlowRateMlPerMin();
   int rawFlow = flowSensor.getRawFlowRate();
-
+  // Serial.println("rawFlow: " + String(rawFlow));
   if (flow != lastFlow)
   {
     Serial.println("rawFlow: " + String(rawFlow) + " flow: " + String(flow));
