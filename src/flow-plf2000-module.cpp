@@ -40,78 +40,91 @@ void FlowPlf2000Module::watchFlowTask(void *instance)
 
     for (;;)
     {
-        // int8_t byteCount = 5;
-        // uint8_t bytes[byteCount];
+        uint8_t sampleCount = 8;
+        uint16_t multiSample = 0;
+        int8_t byteCount = 5;
+        uint8_t bytes[byteCount];
 
-        // I2C->beginTransmission(PLF2000_I2C_ADDR);
-        // vTaskDelay(5 / portTICK_PERIOD_MS);
-
-        // I2C->requestFrom(PLF2000_I2C_ADDR, byteCount);
-
-        // vTaskDelay(5 / portTICK_PERIOD_MS);
-
-        // uint8_t sum = 0;
-        // uint8_t i = 0;
-        // if (I2C->available())
-        // {
-        //     for (i = 0; i < byteCount; i++)
-        //     {
-
-        //         bytes[i] = I2C->read();
-
-        //         if (i > 0)
-        //         {
-        //             sum += bytes[i];
-        //         }
-        //     }
-        // }
-
-        // if (i < byteCount)
-        // {
-        //     Serial.println("Error reading I2C value (not enough bytes): " + String(i));
-        // }
-
-        // uint16_t sensorValue = (uint16_t)(((uint16_t)bytes[1] << 8) | bytes[2]);
-        // uint8_t check = 0x01 + ~(sum);
-
-        // if (bytes[0] != check)
-        // {
-        //     Serial.println("Checksum does not match. Expected: " + String(bytes[0]) + " Actual: " + String(check));
-        // }
-
-        // myself->_setRawFlowRate(sensorValue);
-
-        I2C->beginTransmission(PLF2000_I2C_ADDR);
-
-        vTaskDelay(20 / portTICK_PERIOD_MS);
-
-        I2C->requestFrom(PLF2000_I2C_ADDR, 5);
-
-        vTaskDelay(5 / portTICK_PERIOD_MS);
-
-        if (I2C->available())
+        for (uint8_t sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
         {
 
-            uint8_t checksum = I2C->read();
-            uint8_t myMSB = I2C->read();
-            uint8_t myLSB = I2C->read();
-            // clear the two remaining "reserved" bytes.
-            uint8_t byte3 = I2C->read();
-            uint8_t byte4 = I2C->read();
+            I2C->beginTransmission(PLF2000_I2C_ADDR);
+            vTaskDelay(1 / portTICK_PERIOD_MS);
 
-            uint16_t sum = myMSB + myLSB + byte3 + byte4;
+            I2C->requestFrom(PLF2000_I2C_ADDR, byteCount);
+
+            // plf2000 min sample time is 5ms.
+            // 5ms delay will give about 200 sps.
+            vTaskDelay(4 / portTICK_PERIOD_MS);
+
+            uint8_t sum = 0;
+            uint8_t i = 0;
+            if (I2C->available())
+            {
+                for (i = 0; i < byteCount; i++)
+                {
+
+                    bytes[i] = I2C->read();
+
+                    if (i > 0)
+                    {
+                        sum += bytes[i];
+                    }
+                }
+            }
+
+            if (i < byteCount)
+            {
+                Serial.println("Error reading I2C value (not enough bytes): " + String(i));
+            }
+
+            uint16_t sensorValue = (uint16_t)(((uint16_t)bytes[1] << 8) | bytes[2]);
             uint8_t check = 0x01 + ~(sum);
 
-            uint16_t sensorValue = (uint16_t)(((uint16_t)myMSB << 8) | myLSB);
+            if (bytes[0] != check)
+            {
+                Serial.println("Checksum does not match. Expected: " + String(bytes[0]) + " Actual: " + String(check));
+            }
+            else
+            {
+                multiSample += sensorValue;
+            }
+        }
 
-            myself->printRawData(sensorValue, checksum, myMSB, myLSB, byte3, byte4, check);
+        uint16_t avgValue = multiSample / sampleCount;
+        myself->_setRawFlowRate(avgValue);
 
-            myself->_setRawFlowRate(sensorValue);
+        // I2C->beginTransmission(PLF2000_I2C_ADDR);
 
-            highwater = uxTaskGetStackHighWaterMark(NULL);
+        // vTaskDelay(20 / portTICK_PERIOD_MS);
 
-            vTaskDelay(100 / portTICK_PERIOD_MS);
-        };
+        // I2C->requestFrom(PLF2000_I2C_ADDR, 5);
+
+        // vTaskDelay(5 / portTICK_PERIOD_MS);
+
+        // if (I2C->available())
+        // {
+
+        //     uint8_t checksum = I2C->read();
+        //     uint8_t myMSB = I2C->read();
+        //     uint8_t myLSB = I2C->read();
+        //     // clear the two remaining "reserved" bytes.
+        //     uint8_t byte3 = I2C->read();
+        //     uint8_t byte4 = I2C->read();
+
+        //     uint16_t sum = myMSB + myLSB + byte3 + byte4;
+        //     uint8_t check = 0x01 + ~(sum);
+
+        //     uint16_t sensorValue = (uint16_t)(((uint16_t)myMSB << 8) | myLSB);
+
+        //     myself->printRawData(sensorValue, checksum, myMSB, myLSB, byte3, byte4, check);
+
+        //     myself->_setRawFlowRate(sensorValue);
+
+        //     highwater = uxTaskGetStackHighWaterMark(NULL);
+
+        //     vTaskDelay(100 / portTICK_PERIOD_MS);
+        // };
     }
 
     vTaskDelete(NULL);
@@ -294,7 +307,7 @@ TwoWire *FlowPlf2000Module::getI2cInstance(void)
 
 void FlowPlf2000Module::_setRawFlowRate(int newRawFlowRate)
 {
-    Serial.println("_setRawFlowRate: " + String(newRawFlowRate));
+    // Serial.println("_setRawFlowRate: " + String(newRawFlowRate));
     rawFlowRate = newRawFlowRate;
     // sensor can sometimes return invalid value (e.g 0xFFFF)
     // if (newRawFlowRate <= 5000)
