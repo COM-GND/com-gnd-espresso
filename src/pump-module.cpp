@@ -9,11 +9,11 @@
 int gZcPin;
 int gPowerOn = false;
 
-PumpModule::PumpModule(int zcPin, int cntrlPin) : pump(cntrlPin)
+PumpModule::PumpModule(int zcPin, int cntrlPin) : pump(zcPin, cntrlPin, 127)
 {
   xHandle = NULL;
-  pumpMin = 110;
-  pumpMax = 254;
+  pumpMin = 0;
+  pumpMax = 127;
   pumpRange = pumpMax - pumpMin;
   pumpLevel = pumpMax;
   oldPowerIsOn = false;
@@ -32,9 +32,9 @@ PumpModule::~PumpModule()
 }
 
 /**
-     * FreeRTOS callback to monitor the ZC pin to see if the pump is recieving power
-     * we don't user interupts becuase the DimmableLight library has already attached one
-     */
+ * FreeRTOS callback to monitor the ZC pin to see if the pump is recieving power
+ * we don't user interupts becuase the DimmableLight library has already attached one
+ */
 void PumpModule::watchPumpPowerTask(void *pump)
 {
   PumpModule *myself = (PumpModule *)pump;
@@ -83,7 +83,7 @@ void PumpModule::setZeroCrossPin(int zcPin)
 {
   zeroCrossPin = zcPin;
   gZcPin = zcPin;
-  DimmableLightLinearized::setSyncPin(zcPin);
+  // DimmableLightLinearized::setSyncPin(zcPin);
 }
 
 int PumpModule::getZeroCrossPin()
@@ -103,7 +103,7 @@ void PumpModule::begin()
       10,
       &xHandle);
 
-  DimmableLightLinearized::begin();
+  // DimmableLightLinearized::begin();
 }
 
 bool PumpModule::getPowerIsOn()
@@ -158,9 +158,9 @@ int PumpModule::getPumpRange()
 }
 
 /**
-     * Set the percentage pump level 
-     * (normalized between the pump min and max)
-     */
+ * Set the percentage pump level (0.0 - 1.0)
+ * (normalized between the pump min and max)
+ */
 void PumpModule::setPumpPercent(float perc)
 {
   Serial.println("setPumpPercent: " + String(perc));
@@ -174,7 +174,8 @@ void PumpModule::setPumpPercent(float perc)
     perc = 1;
   }
   pumpLevel = pumpMin + round(pumpRange * perc);
-  pump.setBrightness(pumpLevel);
+  // pump.setBrightness(pumpLevel);
+  pump.set((uint8_t)pumpLevel);
 }
 
 float PumpModule::getPumpPercent()
@@ -184,7 +185,7 @@ float PumpModule::getPumpPercent()
 }
 
 /**
- * Set the absolute pump value 
+ * Set the absolute pump value
  * Value range is between 0 and 255
  * but cannot be less than pumpMin or larger than pumpMax
  */
@@ -199,7 +200,8 @@ void PumpModule::setPumpLevel(int level)
     level = pumpMax;
   }
   pumpLevel = level;
-  pump.setBrightness(pumpLevel);
+  // pump.setBrightness(pumpLevel);
+  pump.set(pumpLevel);
 }
 
 int PumpModule::getPumpLevel()

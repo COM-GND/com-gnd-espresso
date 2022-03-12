@@ -1,7 +1,9 @@
 
 #ifndef PUMPMODULE_H
 #define PUMPMODULE_H
-#include <dimmable_light_linearized.h>
+// #include <RBDdimmer.h>
+#include <PSM.h>
+// #include <dimmable_light_linearized.h>
 // #include "pump-module-callbacks.h"
 
 class PumpModuleCallbacks;
@@ -18,7 +20,9 @@ private:
     int oldPowerIsOn;
     int powerIsOn;
     PumpModuleCallbacks *callbacks = nullptr;
-    DimmableLightLinearized pump;
+    // DimmableLightLinearized pump;
+    // dimmerLamp pump()
+    PSM pump;
 
 public:
     PumpModule(int, int);
