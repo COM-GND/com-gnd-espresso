@@ -38,24 +38,28 @@ void FlowPlf2000Module::watchFlowTask(void *instance)
 
     unsigned int highwater = 0;
 
+    // try to sync with AC
+    // 60hz = ~16.6ms pr cycle
+    // sample at half that to get aprox min and max
     for (;;)
     {
-        uint8_t sampleCount = 8;
-        uint16_t multiSample = 0;
+        uint8_t multiSamples = 4;
+        uint8_t sampleCount = 0;
+        uint16_t multiSampleSum = 0;
         int8_t byteCount = 5;
         uint8_t bytes[byteCount];
 
-        for (uint8_t sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
+        for (uint8_t sampleIndex = 0; sampleIndex < multiSamples; sampleIndex++)
         {
 
             I2C->beginTransmission(PLF2000_I2C_ADDR);
-            vTaskDelay(1 / portTICK_PERIOD_MS);
+            vTaskDelay(2 / portTICK_PERIOD_MS);
 
             I2C->requestFrom(PLF2000_I2C_ADDR, byteCount);
 
             // plf2000 min sample time is 5ms.
             // 5ms delay will give about 200 sps.
-            vTaskDelay(4 / portTICK_PERIOD_MS);
+            vTaskDelay(6 / portTICK_PERIOD_MS);
 
             uint8_t sum = 0;
             uint8_t i = 0;
@@ -76,6 +80,7 @@ void FlowPlf2000Module::watchFlowTask(void *instance)
             if (i < byteCount)
             {
                 Serial.println("Error reading I2C value (not enough bytes): " + String(i));
+                break;
             }
 
             uint16_t sensorValue = (uint16_t)(((uint16_t)bytes[1] << 8) | bytes[2]);
@@ -84,15 +89,22 @@ void FlowPlf2000Module::watchFlowTask(void *instance)
             if (bytes[0] != check)
             {
                 Serial.println("Checksum does not match. Expected: " + String(bytes[0]) + " Actual: " + String(check));
+                break;
             }
-            else
-            {
-                multiSample += sensorValue;
-            }
+
+            multiSampleSum += sensorValue;
+            sampleCount++;
         }
 
-        uint16_t avgValue = multiSample / sampleCount;
-        myself->_setRawFlowRate(avgValue);
+        if (sampleCount == multiSamples)
+        {
+            uint16_t avgValue = multiSampleSum / multiSamples;
+            myself->_setRawFlowRate(avgValue);
+        }
+        else
+        {
+            Serial.println("Not enough flow samples. Expected: " + String(multiSamples) + " Actual: " + String(sampleCount));
+        }
 
         // I2C->beginTransmission(PLF2000_I2C_ADDR);
 
@@ -146,6 +158,7 @@ void FlowPlf2000Module::begin()
 {
     Serial.println("FlowPlf2000Module Begin");
 
+    rawFlowRateSmoother.begin(SMOOTHED_EXPONENTIAL, 10);
     xTaskCreate(
         &FlowPlf2000Module::watchFlowTask, // Function that should be called
         "read_flow_rate",                  // Name of the task (for debugging)
@@ -194,7 +207,7 @@ uint16_t FlowPlf2000Module::readCalibrated(void)
         return 0;
     }
 
-    uint16_t sensorValue = (uint16_t)(((uint16_t)bytes[1] << 8) | bytes[2]);
+    uint8_t sensorValue = (uint16_t)(((uint16_t)bytes[1] << 8) | bytes[2]);
     uint8_t check = 0x01 + ~(sum);
 
     if (bytes[0] != check)
@@ -270,7 +283,7 @@ float FlowPlf2000Module::getFlowRateMlPerMin(void)
     // Use sensor data lookup-table to interpolate the flow rate.
     FlowRateData lowerDataPoint = flowRateTable[0];
     FlowRateData upperDataPoint = flowRateTable[FLOW_RATE_TABLE_SIZE - 1];
-    int flowCount = rawFlowRate;
+    int flowCount = getRawFlowRate();
     if (flowCount < lowerDataPoint.count)
     {
         flowCount = lowerDataPoint.count;
@@ -305,18 +318,17 @@ TwoWire *FlowPlf2000Module::getI2cInstance(void)
     return I2C;
 }
 
-void FlowPlf2000Module::_setRawFlowRate(int newRawFlowRate)
+void FlowPlf2000Module::_setRawFlowRate(uint16_t newRawFlowRate)
 {
     // Serial.println("_setRawFlowRate: " + String(newRawFlowRate));
     rawFlowRate = newRawFlowRate;
-    // sensor can sometimes return invalid value (e.g 0xFFFF)
-    // if (newRawFlowRate <= 5000)
-    // {
-
-    // }
+    rawFlowRateSmoother.add(newRawFlowRate);
 }
 
-int FlowPlf2000Module::getRawFlowRate(void)
+uint16_t FlowPlf2000Module::getRawFlowRate(void)
 {
-    return rawFlowRate;
+    uint16_t result = rawFlowRateSmoother.get();
+    Serial.println("rawFlowRateSmoother: " + String(result));
+    return result;
+    // return rawFlowRate;
 }

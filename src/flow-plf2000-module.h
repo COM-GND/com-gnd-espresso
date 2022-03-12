@@ -2,6 +2,7 @@
 #define FLOWPLF2000_H
 #include <Arduino.h>
 #include <Wire.h>
+#include <Smoothed.h>
 
 #define PLF2000_I2C_ADDR 0x50
 #define FLOW_RATE_TABLE_SIZE 11
@@ -9,9 +10,10 @@ class FlowPlf2000Module
 {
 private:
     TaskHandle_t xHandle;
-    void _setRawFlowRate(int);
+    void _setRawFlowRate(uint16_t);
     TwoWire *I2C;
-    int rawFlowRate = 0;
+    uint16_t rawFlowRate = 0;
+    Smoothed<uint16_t> rawFlowRateSmoother;
 
 public:
     typedef struct
@@ -40,7 +42,7 @@ public:
     void printRawData(uint16_t val, uint8_t checksum, uint8_t byte1, uint8_t byte2, uint8_t byte3, uint8_t byte4, uint8_t check);
     static void watchFlowTask(void *);
     void begin(void);
-    int getRawFlowRate(void);
+    uint16_t getRawFlowRate(void);
     uint16_t readCalibrated(void);
     uint16_t readUncalibrated(void);
     int readSensor(void);
