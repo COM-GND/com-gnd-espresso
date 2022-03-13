@@ -12,7 +12,7 @@ int gPowerOn = false;
 PumpModule::PumpModule(int zcPin, int cntrlPin) : pump(cntrlPin)
 {
   xHandle = NULL;
-  pumpMin = 110;
+  pumpMin = 115;
   pumpMax = 254;
   pumpRange = pumpMax - pumpMin;
   pumpLevel = pumpMax;
@@ -32,9 +32,9 @@ PumpModule::~PumpModule()
 }
 
 /**
-     * FreeRTOS callback to monitor the ZC pin to see if the pump is recieving power
-     * we don't user interupts becuase the DimmableLight library has already attached one
-     */
+ * FreeRTOS callback to monitor the ZC pin to see if the pump is recieving power
+ * we don't user interupts becuase the DimmableLight library has already attached one
+ */
 void PumpModule::watchPumpPowerTask(void *pump)
 {
   PumpModule *myself = (PumpModule *)pump;
@@ -158,9 +158,9 @@ int PumpModule::getPumpRange()
 }
 
 /**
-     * Set the percentage pump level 
-     * (normalized between the pump min and max)
-     */
+ * Set the percentage pump level
+ * (normalized between the pump min and max)
+ */
 void PumpModule::setPumpPercent(float perc)
 {
   Serial.println("setPumpPercent: " + String(perc));
@@ -184,7 +184,7 @@ float PumpModule::getPumpPercent()
 }
 
 /**
- * Set the absolute pump value 
+ * Set the absolute pump value
  * Value range is between 0 and 255
  * but cannot be less than pumpMin or larger than pumpMax
  */
