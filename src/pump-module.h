@@ -9,6 +9,8 @@
 // #include <dimmable_light_linearized.h>
 // #include "pump-module-callbacks.h"
 
+// void static IRAM_ATTR handleZeroCrossIsr();
+
 class PumpModuleCallbacks;
 
 class PumpModule
@@ -20,26 +22,25 @@ private:
     uint8_t pumpMin;
     uint8_t pumpMax;
     uint8_t pumpRange;
-    uint8_t pumpLevel;
+    volatile uint8_t pumpLevel;
     uint8_t oldPowerIsOn;
     uint8_t powerIsOn;
-    uint8_t psmIndex = 0;            // the current psm pulse index
-    uint8_t psmMaxPeriodCounts = 10; // the max number of counts in a psm period
-    uint8_t psmPeriodCounts;         // the number of counts in psm period
-    uint8_t psmOnCounts = 1;         // the number of counts within period that pump is on
+    uint8_t psmIndex = 0;                     // the current psm pulse index
+    volatile uint8_t psmMaxPeriodCounts = 20; // the max number of counts in a psm period
+    uint8_t currPsmPeriodCounts = 10;         // the number of counts in the current psm period
+    uint8_t currPsmOnCounts = 10;             // the number of counts within the current period that the pump is on
+    uint8_t nextPsmPeriodCounts = 10;         // the number of counts in next psm period
+    uint8_t nextPsmOnCounts = 10;             // the number of counts within the next period that the pump is on
 
     float_t acFqMs = 16.66; // (1/60hz) * 1000 - duration in MS of a single peek-to-peek ac oscillation
     PumpModuleCallbacks *callbacks = nullptr;
-    // DimmableLightLinearized pump;
-    // dimmerLamp pump()
-    // PSM pump;
-    void static IRAM_ATTR handleZeroCrossIsr();
+    void computeVPsm();
 
 public:
     PumpModule(uint8_t, uint8_t);
     ~PumpModule();
     static void watchPumpPowerTask(void *pump);
-    void doVariablePeriodPsm();
+    void IRAM_ATTR doVariablePeriodPsm();
     void setZeroCrossPin(int);
     int getZeroCrossPin();
     void begin();

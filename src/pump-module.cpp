@@ -11,6 +11,14 @@ int gPowerOn = false;
 
 PumpModule *_pumpModule;
 
+/**
+ * The Zero Cross Interupt Handler
+ */
+void IRAM_ATTR handleZeroCrossIsr()
+{
+  _pumpModule->doVariablePeriodPsm();
+}
+
 PumpModule::PumpModule(uint8_t zcPin, uint8_t _ctrlPin)
 {
   _pumpModule = this;
@@ -22,6 +30,8 @@ PumpModule::PumpModule(uint8_t zcPin, uint8_t _ctrlPin)
   oldPowerIsOn = false;
   powerIsOn = false;
   ctrlPin = _ctrlPin;
+  pinMode(ctrlPin, OUTPUT);
+  digitalWrite(ctrlPin, LOW);
   Serial.println("New PumpModule - zc pin: " + String(zcPin) + " ctrl pin: " + String(ctrlPin));
   setZeroCrossPin(zcPin);
   Serial.println("New Pump Modules");
@@ -112,11 +122,6 @@ void PumpModule::begin()
   // DimmableLightLinearized::begin();
 }
 
-void IRAM_ATTR handleZeroCrossIsr()
-{
-  _pumpModule->doVariablePeriodPsm();
-}
-
 // void PumpModule::setupVariablePeriodPsm()
 // {
 // }
@@ -126,33 +131,34 @@ void IRAM_ATTR handleZeroCrossIsr()
  * This approach finds the lowest number of AC cycles that can be used to represent
  * the desired power level. EG. 10% = 1:10 (1 cycle on, 9 off); 20% = 1:5 (1 cycle on, 4 off).
  * The maximum cycle period is set with psmMaxPeriodCounts value.
+ * NOTE: this is called from the ISR. It cannot contain float values
+ * see: https://www.reddit.com/r/esp32/comments/lj2nkx/just_discovered_that_you_cant_use_floats_in_isr/
  */
-void PumpModule::doVariablePeriodPsm()
+void IRAM_ATTR PumpModule::doVariablePeriodPsm()
 {
 
   if (psmIndex < psmMaxPeriodCounts)
   {
     // The previous PSM period is still active
-    if (psmIndex < psmOnCounts)
+    if (psmIndex < currPsmOnCounts)
     {
       // set pump control pin high
+      digitalWrite(ctrlPin, HIGH);
     }
     else
     {
       // set pump control pin low
+      digitalWrite(ctrlPin, LOW);
     }
   }
 
   psmIndex++;
 
-  if (psmIndex >= psmMaxPeriodCounts)
+  if (psmIndex >= currPsmPeriodCounts)
   {
-    // calculate the next PSM period
-    uint16_t rawCounts = round(getPumpPercent() * (float)psmMaxPeriodCounts);
-    uint16_t gcdCounts = gcd(rawCounts, psmMaxPeriodCounts);
-    psmPeriodCounts = psmMaxPeriodCounts / gcdCounts;
-    psmOnCounts = rawCounts > 0 ? rawCounts / gcdCounts : 0;
     psmIndex = 0;
+    currPsmPeriodCounts = nextPsmPeriodCounts;
+    currPsmOnCounts = nextPsmOnCounts;
   }
 }
 
@@ -224,8 +230,7 @@ void PumpModule::setPumpPercent(float perc)
     perc = 1;
   }
   pumpLevel = pumpMin + round(pumpRange * perc);
-  // pump.setBrightness(pumpLevel);
-  // pump.set((uint8_t)pumpLevel);
+  computeVPsm();
 }
 
 /**
@@ -235,6 +240,7 @@ void PumpModule::setPumpPercent(float perc)
 float PumpModule::getPumpPercent()
 {
   float pumpPerc = (float)(pumpLevel - pumpMin) / (float)pumpRange;
+  Serial.println("p%: " + String(pumpLevel) + " - " + String(pumpMin) + " / " + String(pumpRange));
   return pumpPerc;
 }
 
@@ -254,11 +260,37 @@ void PumpModule::setPumpLevel(int level)
     level = pumpMax;
   }
   pumpLevel = level;
-  // pump.setBrightness(pumpLevel);
-  // pump.set(pumpLevel);
+  computeVPsm();
 }
 
 int PumpModule::getPumpLevel()
 {
   return pumpLevel;
+}
+
+/**
+ * Calculate the next set of Variable PSM values.
+ * The current PSM period will finish and then these values will be used in the next cycle.
+ * This function is called from setPumpLevel and setPumpPerc so that the VPSM values
+ * are updated as needed. This async pattern is used to avoid unnecessary calculation in the ISR,
+ * and to work around the limitations on float values in the ISR.
+ */
+void PumpModule::computeVPsm()
+{
+  // calculate the next PSM period
+  Serial.println("p%: " + String(pumpLevel) + " - " + String(pumpMin) + " / " + String(pumpRange));
+
+  float pumpPerc = (float)(pumpLevel - pumpMin) / (float)pumpRange;
+  Serial.println("%: " + String(pumpPerc));
+
+  uint16_t rawCounts = round(pumpPerc * (float)psmMaxPeriodCounts);
+  Serial.println("raw: " + String(rawCounts));
+
+  uint16_t gcdCounts = gcd(rawCounts, psmMaxPeriodCounts);
+  Serial.println("gcd: " + String(gcdCounts));
+
+  nextPsmPeriodCounts = gcdCounts > 0 ? psmMaxPeriodCounts / gcdCounts : 0;
+  nextPsmOnCounts = rawCounts > 0 ? rawCounts / gcdCounts : 0;
+
+  Serial.println("psm: " + String(nextPsmOnCounts) + " : " + String(nextPsmPeriodCounts));
 }
