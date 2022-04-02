@@ -406,7 +406,7 @@ void setup()
   Serial.println("Setup start");
   Serial.begin(115200);
 
-  // flow sensor support 100k and 400k freq
+  // fs21012 flow sensor support 100k and 400k freq
   I2C.begin(i2cSda, i2cScl, 100000);
 
   flowSensor.begin();
@@ -557,9 +557,12 @@ void setup()
 void loop()
 {
 
+  // uint16_t flowCount = flowSensor.readCalibrated();
+  // Serial.println("flowCount: " + String(flowCount));
+  // delay(6);
   float flow = flowSensor.getFlowRateMlPerMin();
-  int rawFlow = flowSensor.getRawFlowRate();
-
+  uint16_t rawFlow = flowSensor.getRawFlowRate();
+  // Serial.println("rawFlow: " + String(rawFlow));
   if (flow != lastFlow)
   {
     Serial.println("rawFlow: " + String(rawFlow) + " flow: " + String(flow));
@@ -606,7 +609,7 @@ void loop()
     // e.g. when the portafilter is empty, the pressure will be approaching 0, as flow approaches pump maximum.
     // ideally the system would model flow rate rather than pressure to solve this.
     // Intead, we switch off the PID when there is no pressurization.
-    if (barPressure < .25)
+    if (barPressure < 1.0)
     {
       pressurePID.SetMode(QuickPID::MANUAL);
       // tempPID.SetMode(QuickPID::AUTOMATIC);

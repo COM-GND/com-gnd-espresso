@@ -14,12 +14,12 @@ public:
     ESP32AnalogRead adc;
     int rawPressure; // must be static so that the RTOS task can change it
     /*
-    * Sensor range is .5 to 4.5V
-    * voltage divider on sensor ouput is: 1.2k : 3.3k
-    * Dropping the voltage from 4.5v to 3.3v and .5 to .37v
-    * New output range .37v to 3.3v -> ~370 to 3300 mv 
-    */
-    const int minRawPressure = 320;   // .37v = 0bar (should be 370, but reducing to 320 to compensate for error in resistor - adjust as needed)
+     * Sensor range is .5 to 4.5V
+     * voltage divider on sensor ouput is: 1.2k : 3.3k
+     * Dropping the voltage from 4.5v to 3.3v and .5 to .37v
+     * New output range .37v to 3.3v -> ~370 to 3300 mv
+     */
+    const int minRawPressure = 370;  // .37v = 0bar (should be 370, but reducing to 320 to compensate for error in resistor - adjust as needed)
     const int maxRawPressure = 3300; // 3.3v = ~10bar
     int rawPressureRange;
     PressureM323Module(unsigned char, int);

@@ -214,12 +214,12 @@ int PumpModule::getPumpRange()
 }
 
 /**
- * Set the percentage pump level (0.0 - 1.0)
+ * Set the percentage pump level
  * (normalized between the pump min and max)
  */
 void PumpModule::setPumpPercent(float perc)
 {
-  Serial.println("setPumpPercent: " + String(perc));
+  // Serial.println("setPumpPercent: " + String(perc));
 
   if (perc < 0)
   {
