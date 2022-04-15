@@ -1,9 +1,4 @@
 
-/**
- * NOTE: The mains frequency must be set in ./lib/Dimmable-Light-Arduino-master/src/thyristor.h
- * It has been set 60hz for this application.
- */
-
 #include "pump-module.h"
 
 int gZcPin;
@@ -47,7 +42,7 @@ PumpModule::~PumpModule()
 
 /**
  * FreeRTOS callback to monitor the ZC pin to see if the pump is receiving power
- * we don't user interupts because the DimmableLight library has already attached one
+ * TODO: refactor to use interupt along with PSM code.
  */
 void PumpModule::watchPumpPowerTask(void *pump)
 {
@@ -122,15 +117,8 @@ void PumpModule::begin()
   // DimmableLightLinearized::begin();
 }
 
-// void PumpModule::setupVariablePeriodPsm()
-// {
-// }
-
 /**
- * Variable PSM calculations.
- * This approach finds the lowest number of AC cycles that can be used to represent
- * the desired power level. EG. 10% = 1:10 (1 cycle on, 9 off); 20% = 1:5 (1 cycle on, 4 off).
- * The maximum cycle period is set with psmMaxPeriodCounts value.
+ * Variable PSM Interupt handler.
  * NOTE: this is called from the ISR. It cannot contain float values
  * see: https://www.reddit.com/r/esp32/comments/lj2nkx/just_discovered_that_you_cant_use_floats_in_isr/
  */
@@ -270,6 +258,9 @@ int PumpModule::getPumpLevel()
 
 /**
  * Calculate the next set of Variable PSM values.
+ * This approach finds the lowest number of AC cycles that can be used to represent
+ * the desired power level. EG. 10% = 1:10 (1 cycle on, 9 off); 20% = 1:5 (1 cycle on, 4 off).
+ * The maximum cycle period is set with psmMaxPeriodCounts value.
  * The current PSM period will finish and then these values will be used in the next cycle.
  * This function is called from setPumpLevel and setPumpPerc so that the VPSM values
  * are updated as needed. This async pattern is used to avoid unnecessary calculation in the ISR,

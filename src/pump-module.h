@@ -4,13 +4,6 @@
 #include <Arduino.h>
 #include "utils.h"
 
-// #include <RBDdimmer.h>
-// #include <PSM.h>
-// #include <dimmable_light_linearized.h>
-// #include "pump-module-callbacks.h"
-
-// void static IRAM_ATTR handleZeroCrossIsr();
-
 class PumpModuleCallbacks;
 
 class PumpModule
@@ -26,7 +19,7 @@ private:
     uint8_t oldPowerIsOn;
     uint8_t powerIsOn;
     uint8_t psmIndex = 0;                     // the current psm pulse index
-    volatile uint8_t psmMaxPeriodCounts = 20; // the max number of counts in a psm period
+    volatile uint8_t psmMaxPeriodCounts = 18; // the max number of counts in a psm period
     uint8_t currPsmPeriodCounts = 10;         // the number of counts in the current psm period
     uint8_t currPsmOnCounts = 10;             // the number of counts within the current period that the pump is on
     uint8_t nextPsmPeriodCounts = 10;         // the number of counts in next psm period
