@@ -286,6 +286,14 @@ void PumpModule::computeVPsm()
   Serial.println("psm: " + String(nextPsmOnCounts) + " : " + String(nextPsmPeriodCounts));
 }
 
+/**
+ * Same as computerVPsm but with temporal dithering.
+ * Beacause the Pump runs at a fixed AC frequency, the maximum
+ * resolution of the pump modulation is limited by the psmMaxPeriodCounts.
+ * The larger psmMaxPeriodCounts, the better the power resolution, but the
+ * lower it is in the time domain. The average power resolution can be improved
+ * by statistical averaging the modulation level at each pump cycle.
+ */
 void PumpModule::computeDitheredVPsm()
 {
   // calculate the next PSM period
