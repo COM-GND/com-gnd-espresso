@@ -218,7 +218,7 @@ void PumpModule::setPumpPercent(float perc)
     perc = 1;
   }
   pumpLevel = pumpMin + round(pumpRange * perc);
-  computeVPsm();
+  computeDitheredVPsm();
 }
 
 /**
@@ -276,6 +276,29 @@ void PumpModule::computeVPsm()
 
   uint16_t rawCounts = round(pumpPerc * (float)psmMaxPeriodCounts);
   Serial.println("raw: " + String(rawCounts));
+
+  uint16_t gcdCounts = gcd(rawCounts, psmMaxPeriodCounts);
+  Serial.println("gcd: " + String(gcdCounts));
+
+  nextPsmPeriodCounts = gcdCounts > 0 ? psmMaxPeriodCounts / gcdCounts : 0;
+  nextPsmOnCounts = rawCounts > 0 ? rawCounts / gcdCounts : 0;
+
+  Serial.println("psm: " + String(nextPsmOnCounts) + " : " + String(nextPsmPeriodCounts));
+}
+
+void PumpModule::computeDitheredVPsm()
+{
+  // calculate the next PSM period
+  Serial.println("p%: " + String(pumpLevel) + " - " + String(pumpMin) + " / " + String(pumpRange));
+
+  float pumpPerc = (float)(pumpLevel - pumpMin) / (float)pumpRange;
+  Serial.println("%: " + String(pumpPerc));
+
+  uint16_t rawCounts = pumpPerc * (float)psmMaxPeriodCounts;
+  Serial.println("raw: " + String(rawCounts));
+
+  // add dithering
+  rawCounts = floor(rawCounts + random(1.0));
 
   uint16_t gcdCounts = gcd(rawCounts, psmMaxPeriodCounts);
   Serial.println("gcd: " + String(gcdCounts));

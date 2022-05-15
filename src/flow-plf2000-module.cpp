@@ -4,9 +4,9 @@
 Pins
 1: Vdd
 2: Gnd
-3: Out
-4: SDA
-5: SCL
+3: Analog Out
+4: SDA (esp32 pin 23)
+5: SCL (esp32 pin 22)
 6: N/C
 */
 FlowPlf2000Module::FlowPlf2000Module(TwoWire *twoWire)
@@ -52,14 +52,14 @@ void FlowPlf2000Module::watchFlowTask(void *instance)
         for (uint8_t sampleIndex = 0; sampleIndex < multiSamples; sampleIndex++)
         {
 
-            I2C->beginTransmission(PLF2000_I2C_ADDR);
-            vTaskDelay(2 / portTICK_PERIOD_MS);
+            // I2C->beginTransmission(PLF2000_I2C_ADDR);
+            // vTaskDelay(2 / portTICK_PERIOD_MS);
 
             I2C->requestFrom(PLF2000_I2C_ADDR, byteCount);
 
             // plf2000 min sample time is 5ms.
             // 5ms delay will give about 200 sps.
-            vTaskDelay(6 / portTICK_PERIOD_MS);
+            vTaskDelay(8.3 / portTICK_PERIOD_MS);
 
             uint8_t sum = 0;
             uint8_t i = 0;

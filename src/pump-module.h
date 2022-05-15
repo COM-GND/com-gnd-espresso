@@ -19,7 +19,7 @@ private:
     uint8_t oldPowerIsOn;
     uint8_t powerIsOn;
     uint8_t psmIndex = 0;                     // the current psm pulse index
-    volatile uint8_t psmMaxPeriodCounts = 18; // the max number of counts in a psm period
+    volatile uint8_t psmMaxPeriodCounts = 12; // the max number of counts in a psm period
     uint8_t currPsmPeriodCounts = 10;         // the number of counts in the current psm period
     uint8_t currPsmOnCounts = 10;             // the number of counts within the current period that the pump is on
     uint8_t nextPsmPeriodCounts = 10;         // the number of counts in next psm period
@@ -28,6 +28,7 @@ private:
     float_t acFqMs = 16.66; // (1/60hz) * 1000 - duration in MS of a single peek-to-peek ac oscillation
     PumpModuleCallbacks *callbacks = nullptr;
     void computeVPsm();
+    void computeDitheredVPsm();
 
 public:
     PumpModule(uint8_t, uint8_t);
